@@ -120,21 +120,26 @@ function coerceSettingValue(def: SettingDef, value: unknown, settings: SettingsH
 	}
 }
 
-/** Write one setting to the global config, validated against its panel definition. */
-export function rpcSetSetting(session: AgentSession, path: string, value: unknown): RpcSettingEntry {
+/**
+ * Write one setting to the global config, validated against its panel definition.
+ * Writes are flushed before the response: a host may stop a short-lived process right after it.
+ */
+export async function rpcSetSetting(session: AgentSession, path: string, value: unknown): Promise<RpcSettingEntry> {
 	const settings = host(session);
 	const def = getSettingDef(settings.entries, path);
 	if (!def) throw new Error(`Unknown setting: ${path}`);
 	settings.set(path, coerceSettingValue(def, value, settings));
+	await session.settings.flush();
 	return settingEntry(def, settings);
 }
 
 /** Remove one setting from the global config so another layer or its default applies. */
-export function rpcUnsetSetting(session: AgentSession, path: string): RpcSettingEntry {
+export async function rpcUnsetSetting(session: AgentSession, path: string): Promise<RpcSettingEntry> {
 	const settings = host(session);
 	const def = getSettingDef(settings.entries, path);
 	if (!def) throw new Error(`Unknown setting: ${path}`);
 	settings.unset(path);
+	await session.settings.flush();
 	return settingEntry(def, settings);
 }
 
@@ -215,5 +220,6 @@ export async function rpcSetModelRole(
 		else settings.setModelRole(role, selector);
 	}
 	if (role === "default") await applyEffectiveDefault(session);
+	await settings.flush();
 	return rpcModelRolesState(session);
 }

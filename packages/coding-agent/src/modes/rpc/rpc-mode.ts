@@ -2801,10 +2801,10 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				return success(id, "get_settings", rpcSettingsState(session));
 
 			case "set_setting":
-				return success(id, "set_setting", rpcSetSetting(session, command.path, command.value));
+				return success(id, "set_setting", await rpcSetSetting(session, command.path, command.value));
 
 			case "unset_setting":
-				return success(id, "unset_setting", rpcUnsetSetting(session, command.path));
+				return success(id, "unset_setting", await rpcUnsetSetting(session, command.path));
 
 			case "get_model_roles":
 				return success(id, "get_model_roles", rpcModelRolesState(session));
