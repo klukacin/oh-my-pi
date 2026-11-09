@@ -63,8 +63,11 @@ const notificationDefs = {
 	RpcNotification: doc(
 		[
 			"ReadyEvent",
+			"PlanReviewRequestedEvent",
+			"PlanReviewResolvedEvent",
 			"PromptResultEvent",
 			"SessionSettledEvent",
+			"SessionIdentityChangedEvent",
 			"ExtensionError",
 			"ExtensionUiRequest",
 			"AvailableCommandsUpdateEvent",

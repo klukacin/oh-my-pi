@@ -1,3 +1,8 @@
+import type {
+	PlanReviewChoice,
+	PlanReviewRequestedEvent,
+	PlanReviewResolvedEvent,
+} from "../../extensibility/extensions/types";
 /**
  * RPC Client for programmatic access to the coding agent.
  *
@@ -49,6 +54,7 @@ import type {
 	RpcRemoveQueuedMessageResult,
 	RpcResponse,
 	RpcSessionSettledFrame,
+	RpcSessionIdentityChangedFrame,
 	RpcSessionState,
 	RpcSubagentEventFrame,
 	RpcSubagentLifecycleFrame,
@@ -240,6 +246,15 @@ function isRpcPromptResultFrame(value: unknown): value is RpcPromptResultFrame {
 	return value.type === "prompt_result" && typeof value.agentInvoked === "boolean";
 }
 
+function isRpcSessionIdentityChangedFrame(value: unknown): value is RpcSessionIdentityChangedFrame {
+	return (
+		isRecord(value) &&
+		value.type === "session_identity_changed" &&
+		typeof value.sessionId === "string" &&
+		typeof value.sessionFile === "string"
+	);
+}
+
 function isRpcSessionSettledFrame(value: unknown): value is RpcSessionSettledFrame {
 	return isRecord(value) && value.type === "session_settled";
 }
@@ -299,6 +314,15 @@ function isRpcHostToolCancelRequest(value: unknown): value is RpcHostToolCancelR
 	return value.type === "host_tool_cancel" && typeof value.id === "string" && typeof value.targetId === "string";
 }
 
+function isPlanReviewEvent(value: unknown): value is PlanReviewRequestedEvent | PlanReviewResolvedEvent {
+	return (
+		isRecord(value) &&
+		(value.type === "plan_review_requested" || value.type === "plan_review_resolved") &&
+		typeof value.reviewId === "string" &&
+		typeof value.sessionId === "string"
+	);
+}
+
 function isRpcExtensionUiRequest(value: unknown): value is RpcExtensionUIRequest {
 	if (!isRecord(value)) return false;
 	return value.type === "extension_ui_request" && typeof value.id === "string" && typeof value.method === "string";
@@ -342,6 +366,7 @@ export class RpcClient {
 	#reaping: Promise<void> | null = null;
 	#eventListeners: RpcEventListener[] = [];
 	#sessionEventListeners: RpcSessionEventListener[] = [];
+	#planReviewListeners = new Set<(event: PlanReviewRequestedEvent | PlanReviewResolvedEvent) => void>();
 	#subagentLifecycleListeners = new Set<RpcSubagentLifecycleListener>();
 	#subagentProgressListeners = new Set<RpcSubagentProgressListener>();
 	#subagentEventListeners = new Set<RpcSubagentEventListener>();
@@ -349,6 +374,7 @@ export class RpcClient {
 	#btwDeltaListeners = new Set<(frame: RpcBtwDeltaFrame) => void>();
 	#btwRecordListeners = new Set<(record: RpcBtwHistoryRecord) => void>();
 	#promptResultListeners = new Set<RpcPromptResultListener>();
+	#sessionIdentityChangedListeners = new Set<(frame: RpcSessionIdentityChangedFrame) => void>();
 	#sessionSettledListeners = new Set<RpcSessionSettledListener>();
 	#liveListeners = new Set<RpcLiveListener>();
 	#dictationListeners = new Set<RpcDictationListener>();
@@ -634,9 +660,23 @@ export class RpcClient {
 		};
 	}
 
-	/**
-	 * Subscribe to subagent lifecycle frames after setSubagentSubscription("progress" | "events").
-	 */
+	/** Observe a committed native operation replacing the active session. */
+	onSessionIdentityChanged(listener: (frame: RpcSessionIdentityChangedFrame) => void): () => void {
+		this.#sessionIdentityChangedListeners.add(listener);
+		return () => {
+			this.#sessionIdentityChangedListeners.delete(listener);
+		};
+	}
+
+	/** Subscribe to native plan review requests and their resolutions. */
+	onPlanReview(listener: (event: PlanReviewRequestedEvent | PlanReviewResolvedEvent) => void): () => void {
+		this.#planReviewListeners.add(listener);
+		return () => {
+			this.#planReviewListeners.delete(listener);
+		};
+	}
+
+	/** Subscribe to subagent lifecycle frames after enabling a subagent subscription. */
 	onSubagentLifecycle(listener: RpcSubagentLifecycleListener): () => void {
 		this.#subagentLifecycleListeners.add(listener);
 		return () => this.#subagentLifecycleListeners.delete(listener);
@@ -828,9 +868,33 @@ export class RpcClient {
 		return this.#getData(response);
 	}
 
-	/**
-	 * Get current session state.
-	 */
+	/** Enter or leave native plan mode; requires the nativePlanReview capability. */
+	async setPlanMode(enabled: boolean): Promise<{ enabled: boolean; paused: boolean; planFilePath?: string }> {
+		return this.#getData(await this.#send({ type: "set_plan_mode", enabled }));
+	}
+
+	async openPlanReview(): Promise<boolean> {
+		return this.#getData<{ opened: boolean }>(await this.#send({ type: "open_plan_review" })).opened;
+	}
+
+	async getPendingPlanReview(): Promise<PlanReviewRequestedEvent | null> {
+		return this.#getData<{ review: PlanReviewRequestedEvent | null }>(
+			await this.#send({ type: "get_pending_plan_review" }),
+		).review;
+	}
+
+	async resolvePlanReview(
+		sessionId: string,
+		reviewId: string,
+		choice: PlanReviewChoice,
+		input?: { feedback?: string; role?: string },
+	): Promise<boolean> {
+		return this.#getData<{ accepted: boolean }>(
+			await this.#send({ type: "resolve_plan_review", sessionId, reviewId, choice, ...input }),
+		).accepted;
+	}
+
+	/** Get current session state. */
 	async getState(): Promise<RpcSessionState> {
 		const response = await this.#send({ type: "get_state" });
 		const state = this.#getData<RpcSessionState>(response);
@@ -1577,6 +1641,16 @@ export class RpcClient {
 
 		if (isRpcHostToolCallRequest(data)) {
 			void this.#handleHostToolCall(data);
+			return;
+		}
+
+		if (isRpcSessionIdentityChangedFrame(data)) {
+			for (const listener of this.#sessionIdentityChangedListeners) listener(data);
+			return;
+		}
+
+		if (isPlanReviewEvent(data)) {
+			for (const listener of this.#planReviewListeners) listener(data);
 			return;
 		}
 

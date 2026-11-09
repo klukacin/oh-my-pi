@@ -1,3 +1,4 @@
+import type { SubagentUIBridge } from "./extensibility/subagent-ui";
 import * as path from "node:path";
 import {
 	Agent,
@@ -811,6 +812,7 @@ export interface CreateAgentSessionOptions {
 	 * root session; `buildSubagentSessionOptions` inherits the spawner's.
 	 */
 	subagentEventBus?: EventBus;
+	subagentUIBridge?: SubagentUIBridge;
 
 	/** Skills. Default: discovered from multiple locations */
 	skills?: Skill[];
@@ -2632,6 +2634,7 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			activeRules: [...rulebookRules, ...alwaysApplyRules, ...ttsrManager.getRules()],
 			eventBus,
 			subagentEventBus,
+			getSubagentUIBridge: () => (session ? session.subagentUIBridge : options.subagentUIBridge),
 			outputSchema: options.outputSchema,
 			outputSchemaMode: options.outputSchemaMode,
 			requireYieldTool: options.requireYieldTool,
@@ -5230,6 +5233,16 @@ async function createAgentSessionScoped(options: CreateAgentSessionOptions): Pro
 			titleSystemPrompt: options.titleSystemPrompt,
 			autoTitle: options.autoTitle === true && !isSubagentSession,
 		});
+		session.subagentUIBridge = options.subagentUIBridge;
+		if (agentKind !== "main" && options.subagentUIBridge) {
+			session.subagentUIScope = options.subagentUIBridge.createScope({
+				agentId: resolvedAgentId,
+				parentAgentId: options.parentAgentId,
+				sessionId: sessionManager.getSessionId(),
+			});
+			setToolUIContext(session.subagentUIScope.ui, true);
+		}
+
 		hasSession = true;
 		// The session now owns its cost gate; the interactive TUI starts compression after its first frame.
 		if (options.deferSkillDescriptionCompression !== true) skillDescriptions.startCompression();

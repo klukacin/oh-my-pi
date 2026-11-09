@@ -1,3 +1,4 @@
+import type { SubagentUIBridge } from "../extensibility/subagent-ui";
 /**
  * Subagent execution.
  *
@@ -552,6 +553,7 @@ export interface ExecutorOptions {
 	artifactsDir?: string;
 	eventBus?: EventBus;
 	subagentEventBus?: EventBus;
+	subagentUIBridge?: SubagentUIBridge;
 	contextFiles?: ContextFileEntry[];
 	noContextFiles?: boolean;
 	skills?: Skill[];
@@ -5003,6 +5005,7 @@ async function runSubprocessOnThisThread(options: ExecutorOptions): Promise<Sing
 					preloadedPreparedExtensions: options.preloadedPreparedExtensions,
 					preloadedCustomToolPaths: restrictToolNames ? [] : options.preloadedCustomToolPaths,
 					hasUI: false,
+					subagentUIBridge: options.subagentUIBridge,
 					prewalk,
 					spawns: spawnsEnv,
 					taskDepth: childDepth,

@@ -10,6 +10,50 @@
 		"inbound": "RpcInbound",
 		"commands": [
 			{
+				"name": "set_plan_mode",
+				"doc": "Enter or leave native plan mode.",
+				"params": "SetPlanModeParams",
+				"result": "PlanModeState",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "open_plan_review",
+				"doc": "Open review of the current plan.",
+				"params": null,
+				"result": "OpenPlanReviewResult",
+				"nullable": false,
+				"unwrap": "opened",
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "get_pending_plan_review",
+				"doc": "Read the current pending review, including after reconnect.",
+				"params": null,
+				"result": "GetPendingPlanReviewResult",
+				"nullable": false,
+				"unwrap": "review",
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "resolve_plan_review",
+				"doc": "Resolve a review in its owning session generation.",
+				"params": "ResolvePlanReviewParams",
+				"result": "ResolvePlanReviewResult",
+				"nullable": false,
+				"unwrap": "accepted",
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
 				"name": "negotiate_protocol",
 				"doc": "Switch the connection to a protocol version advertised by `ready`.",
 				"params": "NegotiateProtocolParams",
@@ -2628,11 +2672,55 @@
 			],
 			"description": "Provider-neutral state of an account past its usage limit, discriminated by `stage`."
 		},
+		"PlanModeState": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean"
+				},
+				"paused": {
+					"type": "boolean"
+				},
+				"planFilePath": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"enabled",
+				"paused"
+			]
+		},
+		"RpcCapabilities": {
+			"type": "object",
+			"properties": {
+				"nativePlanReview": {
+					"type": "integer",
+					"description": "Native plan review protocol version; currently 1."
+				},
+				"childApprovals": {
+					"type": "integer",
+					"description": "Child approval protocol version: 0 disables routing, 1 supports scoped dialogs."
+				}
+			},
+			"required": [
+				"nativePlanReview",
+				"childApprovals"
+			]
+		},
 		"SessionState": {
 			"type": "object",
 			"properties": {
 				"sessionId": {
 					"type": "string"
+				},
+				"capabilities": {
+					"$ref": "#/$defs/RpcCapabilities"
+				},
+				"planMode": {
+					"$ref": "#/$defs/PlanModeState"
+				},
+				"pendingPlanReview": {
+					"$ref": "#/$defs/PlanReviewRequestedEvent"
 				},
 				"model": {
 					"$ref": "#/$defs/ModelInfo"
@@ -4530,6 +4618,169 @@
 			],
 			"description": "A session event, discriminated by `type`; `set_event_filter` selects which are sent."
 		},
+		"SessionIdentityChangedEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "session_identity_changed"
+				},
+				"sessionId": {
+					"type": "string"
+				},
+				"sessionFile": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"type",
+				"sessionId",
+				"sessionFile"
+			],
+			"description": "The active session identity changed after a native operation committed; replace the previous session reference."
+		},
+		"SubagentUIIdentity": {
+			"type": "object",
+			"properties": {
+				"agentId": {
+					"type": "string"
+				},
+				"sessionId": {
+					"type": "string"
+				},
+				"parentAgentId": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"agentId",
+				"sessionId"
+			]
+		},
+		"PlanReviewChoice": {
+			"enum": [
+				"execute",
+				"compact",
+				"keep",
+				"refine",
+				"save"
+			],
+			"type": "string"
+		},
+		"PlanReviewOption": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"$ref": "#/$defs/PlanReviewChoice"
+				},
+				"label": {
+					"type": "string"
+				},
+				"disabled": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"id",
+				"label",
+				"disabled"
+			]
+		},
+		"PlanReviewTier": {
+			"type": "object",
+			"properties": {
+				"role": {
+					"type": "string"
+				},
+				"provider": {
+					"type": "string"
+				},
+				"model": {
+					"type": "string"
+				},
+				"thinkingLevel": {
+					"$ref": "#/$defs/ConfiguredThinkingLevel"
+				}
+			},
+			"required": [
+				"role",
+				"provider",
+				"model"
+			]
+		},
+		"PlanReviewRequestedEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "plan_review_requested"
+				},
+				"reviewId": {
+					"type": "string"
+				},
+				"sessionId": {
+					"type": "string"
+				},
+				"title": {
+					"type": "string"
+				},
+				"planFilePath": {
+					"type": "string"
+				},
+				"planContent": {
+					"type": "string"
+				},
+				"options": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PlanReviewOption"
+					}
+				},
+				"tiers": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/PlanReviewTier"
+					}
+				}
+			},
+			"required": [
+				"type",
+				"reviewId",
+				"sessionId",
+				"title",
+				"planFilePath",
+				"planContent",
+				"options"
+			]
+		},
+		"PlanReviewResolvedEvent": {
+			"type": "object",
+			"properties": {
+				"type": {
+					"const": "plan_review_resolved"
+				},
+				"reviewId": {
+					"type": "string"
+				},
+				"sessionId": {
+					"type": "string"
+				},
+				"by": {
+					"enum": [
+						"local",
+						"extension"
+					],
+					"type": "string"
+				},
+				"choice": {
+					"$ref": "#/$defs/PlanReviewChoice"
+				}
+			},
+			"required": [
+				"type",
+				"reviewId",
+				"sessionId",
+				"by"
+			]
+		},
 		"ReadyEvent": {
 			"type": "object",
 			"properties": {
@@ -5200,6 +5451,12 @@
 						"type": "string"
 					}
 				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
+					"type": "string"
+				},
 				"optionDetails": {
 					"type": "array",
 					"items": {
@@ -5236,6 +5493,12 @@
 				"message": {
 					"type": "string"
 				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
+					"type": "string"
+				},
 				"timeout": {
 					"type": "integer"
 				}
@@ -5261,6 +5524,12 @@
 					"const": "input"
 				},
 				"title": {
+					"type": "string"
+				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
 					"type": "string"
 				},
 				"placeholder": {
@@ -5295,6 +5564,12 @@
 				"title": {
 					"type": "string"
 				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
+					"type": "string"
+				},
 				"prefill": {
 					"type": "string"
 				},
@@ -5327,6 +5602,12 @@
 						"$ref": "#/$defs/AskQuestion"
 					}
 				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
+					"type": "string"
+				},
 				"timeout": {
 					"type": "integer"
 				}
@@ -5353,6 +5634,12 @@
 				},
 				"targetId": {
 					"type": "string"
+				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
+					"type": "string"
 				}
 			},
 			"required": [
@@ -5376,6 +5663,12 @@
 					"const": "notify"
 				},
 				"message": {
+					"type": "string"
+				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
 					"type": "string"
 				},
 				"notifyType": {
@@ -5404,6 +5697,12 @@
 				"statusKey": {
 					"type": "string"
 				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
+					"type": "string"
+				},
 				"statusText": {
 					"type": "string"
 				}
@@ -5428,6 +5727,12 @@
 					"const": "setWidget"
 				},
 				"widgetKey": {
+					"type": "string"
+				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
 					"type": "string"
 				},
 				"widgetLines": {
@@ -5461,6 +5766,12 @@
 				},
 				"title": {
 					"type": "string"
+				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
+					"type": "string"
 				}
 			},
 			"required": [
@@ -5484,6 +5795,12 @@
 				},
 				"text": {
 					"type": "string"
+				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
+					"type": "string"
 				}
 			},
 			"required": [
@@ -5506,6 +5823,12 @@
 					"const": "open_url"
 				},
 				"url": {
+					"type": "string"
+				},
+				"subagent": {
+					"$ref": "#/$defs/SubagentUIIdentity"
+				},
+				"rootSessionId": {
 					"type": "string"
 				},
 				"launchUrl": {
@@ -6038,10 +6361,19 @@
 					"$ref": "#/$defs/ReadyEvent"
 				},
 				{
+					"$ref": "#/$defs/PlanReviewRequestedEvent"
+				},
+				{
+					"$ref": "#/$defs/PlanReviewResolvedEvent"
+				},
+				{
 					"$ref": "#/$defs/PromptResultEvent"
 				},
 				{
 					"$ref": "#/$defs/SessionSettledEvent"
+				},
+				{
+					"$ref": "#/$defs/SessionIdentityChangedEvent"
 				},
 				{
 					"$ref": "#/$defs/ExtensionError"
@@ -6119,6 +6451,82 @@
 				}
 			],
 			"description": "Any frame the server writes to stdout (after reassembling `rpc_chunk` sequences), discriminated by `type`."
+		},
+		"SetPlanModeParams": {
+			"type": "object",
+			"properties": {
+				"enabled": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"enabled"
+			]
+		},
+		"OpenPlanReviewResult": {
+			"type": "object",
+			"properties": {
+				"opened": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"opened"
+			]
+		},
+		"GetPendingPlanReviewResult": {
+			"type": "object",
+			"properties": {
+				"review": {
+					"anyOf": [
+						{
+							"$ref": "#/$defs/PlanReviewRequestedEvent"
+						},
+						{
+							"type": "null"
+						}
+					]
+				}
+			},
+			"required": [
+				"review"
+			]
+		},
+		"ResolvePlanReviewParams": {
+			"type": "object",
+			"properties": {
+				"sessionId": {
+					"type": "string"
+				},
+				"reviewId": {
+					"type": "string"
+				},
+				"choice": {
+					"$ref": "#/$defs/PlanReviewChoice"
+				},
+				"feedback": {
+					"type": "string"
+				},
+				"role": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"sessionId",
+				"reviewId",
+				"choice"
+			]
+		},
+		"ResolvePlanReviewResult": {
+			"type": "object",
+			"properties": {
+				"accepted": {
+					"type": "boolean"
+				}
+			},
+			"required": [
+				"accepted"
+			]
 		},
 		"NegotiateProtocolParams": {
 			"type": "object",

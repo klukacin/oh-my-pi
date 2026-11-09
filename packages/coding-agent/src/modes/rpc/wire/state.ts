@@ -102,7 +102,18 @@ export const stateDefs = {
 		"UsageLimitLowPriority | UsageLimitWrapUp",
 		"Provider-neutral state of an account past its usage limit, discriminated by `stage`.",
 	),
+	PlanModeState: { enabled: "boolean", paused: "boolean", "planFilePath?": "string" },
+	RpcCapabilities: {
+		nativePlanReview: doc("number.integer", "Native plan review protocol version; currently 1."),
+		childApprovals: doc(
+			"number.integer",
+			"Child approval protocol version: 0 disables routing, 1 supports scoped dialogs.",
+		),
+	},
 	SessionState: {
+		"capabilities?": "RpcCapabilities",
+		"planMode?": "PlanModeState",
+		"pendingPlanReview?": "PlanReviewRequestedEvent",
 		"model?": "ModelInfo",
 		"thinkingLevel?": "ThinkingLevel",
 		isStreaming: absentAs("boolean", false),

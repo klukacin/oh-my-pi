@@ -33,6 +33,37 @@ const IMAGES = doc("ImageContent[]", "Images attached to the message.");
 
 export const rpcCommands: readonly RpcCommandSpec[] = [
 	{
+		name: "set_plan_mode",
+		doc: "Enter or leave native plan mode.",
+		params: { enabled: "boolean" },
+		result: "PlanModeState",
+	},
+	{
+		name: "open_plan_review",
+		doc: "Open review of the current plan.",
+		result: { opened: "boolean" },
+		unwrap: "opened",
+	},
+	{
+		name: "get_pending_plan_review",
+		doc: "Read the current pending review, including after reconnect.",
+		result: { review: "PlanReviewRequestedEvent | null" },
+		unwrap: "review",
+	},
+	{
+		name: "resolve_plan_review",
+		doc: "Resolve a review in its owning session generation.",
+		params: {
+			sessionId: "string",
+			reviewId: "string",
+			choice: "PlanReviewChoice",
+			"feedback?": "string",
+			"role?": "string",
+		},
+		result: { accepted: "boolean" },
+		unwrap: "accepted",
+	},
+	{
 		name: "negotiate_protocol",
 		doc: "Switch the connection to a protocol version advertised by `ready`.",
 		params: { protocolVersion: "number.integer" },

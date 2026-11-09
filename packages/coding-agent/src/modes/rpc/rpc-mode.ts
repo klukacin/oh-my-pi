@@ -1,3 +1,5 @@
+import { HeadlessPlanController } from "../../plan-mode/headless-controller";
+import { SubagentUIBridge } from "../../extensibility/subagent-ui";
 /**
  * RPC mode: Headless operation with JSON stdin/stdout protocol.
  *
@@ -516,6 +518,7 @@ const USER_INPUT_TYPES: Record<string, true> = {
 };
 
 const SESSION_CHANGE_TYPES: Record<string, true> = {
+	navigate_tree: true,
 	new_session: true,
 	switch_session: true,
 	branch: true,
@@ -1451,11 +1454,15 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	const wordPredictor = new RpcWordPredictor();
 	const btw = new RpcBtwController(session, output);
 	// A continuation abandoned while waiting leaves nothing to end the activity stretch: re-check settlement.
+	let planController: HeadlessPlanController | undefined = undefined;
 	const goalController = new RpcGoalController(session, () => void settleWatcher.check());
 	// A scheduled or held goal turn will start a turn: every settle report treats it as busy,
 	// and any report of "not settled" for that reason is later closed by `session_settled`.
 	const goalTurnScheduled = watchedScheduledTurnProbe(
-		() => goalController.continuationPending,
+		() =>
+			goalController.continuationPending ||
+			planController?.isWorking === true ||
+			planController?.getPending() !== undefined,
 		() => settleWatcher,
 	);
 	const settleWatcher = new RpcSessionSettleWatcher(session, output, goalTurnScheduled);
@@ -1464,6 +1471,27 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 		settledWithoutRun: () => void settleWatcher.check(),
 	});
 	const sessionEvents = new RpcSessionEventForwarder(output);
+	planController = new HeadlessPlanController(session, {
+		onEvent: output,
+		onSessionChanged: identity => {
+			resetChildUIBridge();
+			output({ type: "session_identity_changed", ...identity });
+		},
+		onError: failure => output(error(undefined, "plan_review", failure.message)),
+		onSettled: () => void settleWatcher.check(),
+		runPrompt: async (text, promptOptions) => {
+			const ticket = promptResults.begin(undefined);
+			await watchAndReportPromptResult({
+				ticket,
+				startPrompt: onPromptAdmitted =>
+					session.prompt(text, { ...promptOptions, streamingBehavior: "followUp", onPromptAdmitted }),
+				results: promptResults,
+				onError: failure => output(error(undefined, "plan_review", failure.message)),
+				extensionUserMessageTracker,
+			});
+		},
+	});
+	await planController.restore();
 
 	const pendingExtensionRequests = new RpcPendingExtensionRequests();
 	const hostToolBridge = new RpcHostToolBridge(output);
@@ -1501,7 +1529,31 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	const withSessionChange = async <T>(change: () => Promise<T>): Promise<T> => {
 		sessionChangesInProgress++;
 		try {
-			return await change();
+			return await planController!.withSessionChange(async () => {
+				const previous = [
+					session.sessionId,
+					session.sessionManager.getSessionFile(),
+					session.sessionManager.getLeafId(),
+				];
+				let result: T | undefined;
+				try {
+					result = await change();
+					return result;
+				} finally {
+					const current = [
+						session.sessionId,
+						session.sessionManager.getSessionFile(),
+						session.sessionManager.getLeafId(),
+					];
+					const rejected =
+						isRecord(result) &&
+						(result.cancelled === true ||
+							result.success === false ||
+							(isRecord(result.data) && result.data.cancelled === true));
+					if (previous.some((value, index) => value !== current[index] && (index < 2 || !rejected)))
+						resetChildUIBridge();
+				}
+			});
 		} finally {
 			sessionChangesInProgress--;
 		}
@@ -1522,12 +1574,22 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 		constructor(
 			private pendingRequests: Map<string, PendingExtensionRequest>,
 			private output: (obj: RpcResponse | RpcExtensionUIRequest | object) => void,
+			private lifetime?: AbortSignal,
+			private askDialogOptIn?: () => boolean,
 		) {}
 
+		#dialogOptions(options?: ExtensionUIDialogOptions): ExtensionUIDialogOptions | undefined {
+			if (!this.lifetime) return options;
+			return {
+				...options,
+				signal: options?.signal ? AbortSignal.any([options.signal, this.lifetime]) : this.lifetime,
+			};
+		}
+
 		get askDialog(): ExtensionUIContext["askDialog"] {
-			if (!this.askDialogEnabled) return undefined;
+			if (!(this.askDialogOptIn?.() ?? this.askDialogEnabled)) return undefined;
 			return (questions, dialogOptions) =>
-				requestRpcAskDialog(this.pendingRequests, this.output, questions, dialogOptions);
+				requestRpcAskDialog(this.pendingRequests, this.output, questions, this.#dialogOptions(dialogOptions));
 		}
 
 		select(
@@ -1535,14 +1597,14 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			options: ExtensionUISelectItem[],
 			dialogOptions?: ExtensionUIDialogOptions,
 		): Promise<string | undefined> {
-			return requestRpcSelect(this.pendingRequests, this.output, title, options, dialogOptions);
+			return requestRpcSelect(this.pendingRequests, this.output, title, options, this.#dialogOptions(dialogOptions));
 		}
 
 		confirm(title: string, message: string, dialogOptions?: ExtensionUIDialogOptions): Promise<boolean> {
 			return requestRpcDialog(
 				this.pendingRequests,
 				this.output,
-				dialogOptions,
+				this.#dialogOptions(dialogOptions),
 				false,
 				{ method: "confirm", title, message, timeout: dialogOptions?.timeout },
 				response => {
@@ -1561,7 +1623,13 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			placeholder?: string,
 			dialogOptions?: ExtensionUIDialogOptions,
 		): Promise<string | undefined> {
-			return requestRpcInput(this.pendingRequests, this.output, title, placeholder, dialogOptions);
+			return requestRpcInput(
+				this.pendingRequests,
+				this.output,
+				title,
+				placeholder,
+				this.#dialogOptions(dialogOptions),
+			);
 		}
 
 		onTerminalInput(): () => void {
@@ -1673,7 +1741,14 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			dialogOptions?: ExtensionUIDialogOptions,
 			editorOptions?: { promptStyle?: boolean },
 		): Promise<string | undefined> {
-			return requestRpcEditor(this.pendingRequests, this.output, title, prefill, dialogOptions, editorOptions);
+			return requestRpcEditor(
+				this.pendingRequests,
+				this.output,
+				title,
+				prefill,
+				this.#dialogOptions(dialogOptions),
+				editorOptions,
+			);
 		}
 
 		addAutocompleteProvider(): void {
@@ -1720,6 +1795,24 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	// correct waiting promise regardless of which code path created the request.
 	const rpcUiContext = new RpcExtensionUIContext(pendingExtensionRequests, output);
 	setToolUIContext?.(rpcUiContext, true);
+	const resetChildUIBridge = (): void => {
+		session.subagentUIBridge?.close();
+		if (headless) {
+			session.subagentUIBridge = undefined;
+			return;
+		}
+		session.subagentUIBridge = new SubagentUIBridge((subagent, signal) => {
+			const rootSessionId = session.sessionId;
+			const ui = new RpcExtensionUIContext(
+				pendingExtensionRequests,
+				frame => output({ ...frame, subagent, rootSessionId }),
+				signal,
+				() => rpcUiContext.askDialogEnabled,
+			);
+			return ui;
+		});
+	};
+	resetChildUIBridge();
 	const setAskDialog = (command: RpcCommand & { type: "set_ask_dialog" }): RpcResponse => {
 		rpcUiContext.askDialogEnabled = command.enabled === true;
 		return success(command.id, "set_ask_dialog", { enabled: rpcUiContext.askDialogEnabled });
@@ -1753,6 +1846,11 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	// Set up extensions with RPC-based UI context
 	await initializeExtensions(session, {
 		mode: "rpc",
+		planReview: {
+			resolvePlanReview: (id, choice, input) => planController!.resolve(id, choice, input),
+			getPendingPlanReview: () => planController!.getPending(),
+			openPlanReview: () => planController!.open(),
+		},
 		// Extension-initiated session changes get the same goal quiesce/reattach as the commands below.
 		wrapSessionChange: <T extends { cancelled: boolean }>(
 			change: () => Promise<T>,
@@ -1827,6 +1925,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	 * rejection with no latched store failure still surfaces to the caller.
 	 */
 	const disposeAndExit = async (): Promise<never> => {
+		planController?.dispose();
+		session.subagentUIBridge?.close();
 		try {
 			// The process ends regardless; report an unsaved side answer instead of skipping dispose.
 			await btw.close().catch(btwError => {
@@ -2018,6 +2118,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 	// Handle a single command
 	const handleCommandImpl = async (command: RpcCommand): Promise<RpcResponse> => {
 		const id = command.id;
+		if (Object.hasOwn(USER_INPUT_TYPES, command.type) && planController?.transitionPending)
+			return error(id, command.type, "Plan transition is still running", "session_busy");
 
 		switch (command.type) {
 			case "negotiate_protocol": {
@@ -2082,6 +2184,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			}
 
 			case "abort": {
+				planController?.cancel();
 				goalController.stopForHostAbort();
 				abortBuiltinCommands("RPC command aborted by host");
 				await session.abort({ reason: USER_INTERRUPT_LABEL });
@@ -2093,6 +2196,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				// dequeued but never recorded) before aborting, so neither the aborted turn nor
 				// abort()'s stranded-queue drain can run it.
 				const restored = session.clearQueue({ forInterrupt: true });
+				planController?.cancel();
 				goalController.stopForHostAbort();
 				abortBuiltinCommands("RPC command aborted by host");
 				await session.abort({ reason: USER_INTERRUPT_LABEL });
@@ -2100,6 +2204,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			}
 
 			case "abort_and_prompt": {
+				planController?.cancel();
 				goalController.stopForHostAbort();
 				abortBuiltinCommands("RPC command aborted by host");
 				await session.abort({ reason: USER_INTERRUPT_LABEL });
@@ -2253,11 +2358,44 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			// State
 			// =================================================================
 
+			case "set_plan_mode": {
+				if (typeof command.enabled !== "boolean") return error(id, command.type, "enabled must be boolean");
+				if (command.enabled) await planController!.enter();
+				else await planController!.exit();
+				return success(id, command.type, planController!.getState());
+			}
+			case "open_plan_review":
+				return success(id, command.type, { opened: await planController!.open() });
+			case "get_pending_plan_review":
+				return success(id, command.type, { review: planController!.getPending() ?? null });
+			case "resolve_plan_review": {
+				if (
+					typeof command.sessionId !== "string" ||
+					typeof command.reviewId !== "string" ||
+					!(["execute", "compact", "keep", "refine", "save"] as string[]).includes(command.choice) ||
+					(command.feedback !== undefined && typeof command.feedback !== "string") ||
+					(command.role !== undefined && typeof command.role !== "string")
+				) {
+					return error(id, command.type, "Invalid plan review response");
+				}
+				return success(id, command.type, {
+					accepted:
+						command.sessionId === session.sessionId &&
+						planController!.resolve(command.reviewId, command.choice, {
+							feedback: command.feedback,
+							role: command.role,
+						}),
+				});
+			}
+
 			case "get_state": {
 				// A goal exit triggered by the last turn restores tools asynchronously; report after it.
 				await goalController.settled();
 				const queuedMessages = session.getQueuedMessages();
 				const state: RpcSessionState = {
+					capabilities: { nativePlanReview: 1, childApprovals: headless ? 0 : 1 },
+					planMode: planController!.getState(),
+					pendingPlanReview: planController!.getPending(),
 					model: session.model,
 					thinkingLevel: session.thinkingLevel,
 					isStreaming: session.isStreaming,
@@ -2955,6 +3093,8 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 
 	// stdin closed — RPC client is gone. Fail pending side-channel requests
 	// first so active/queued commands can settle, then drain accepted work.
+	planController.dispose();
+	session.subagentUIBridge?.close();
 	pendingExtensionRequests.rejectAll("RPC client disconnected before extension UI response completed");
 	hostToolBridge.close("RPC client disconnected before host tool execution completed");
 	hostUriBridge.clear("RPC client disconnected before host URI request completed");

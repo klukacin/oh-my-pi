@@ -1,3 +1,4 @@
+import { isLocalAgentSession } from "../session/agent-session-handle";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -440,6 +441,7 @@ export async function revivePersistedSubagent(spec: PersistedReviveSpec, expecte
 			// Revived agents join the root session tree, so their observability
 			// frames ride the same bus the RPC/collab surfaces subscribed to.
 			subagentEventBus: spec.subagentEventBus,
+			subagentUIBridge: isLocalAgentSession(spec.root) ? spec.root.subagentUIBridge : undefined,
 			modelRegistry: spec.modelRegistry,
 			...(perCallModel ? { model: perCallModel, thinkingLevel: init.perCallThinkingLevel ?? undefined } : {}),
 			...(persistedModelPattern ? { modelPattern: persistedModelPattern } : {}),

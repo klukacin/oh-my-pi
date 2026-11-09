@@ -34,6 +34,14 @@ Behavior notes:
 - When stdin closes, pending extension UI, host-tool, and host-URI requests are rejected; accepted commands are drained, the session is disposed, pending stdout is delivered, and normal shutdown exits with code `0`. A session-persistence failure still latched at disposal exits with code `1` after delivering its `notice` frame.
 - Responses/events are written as one JSON object per line.
 
+## Native plan review
+
+Check `get_state.data.capabilities.nativePlanReview === 1` before using native plan review. `set_plan_mode` with `enabled: true` enters planning without submitting a prompt; `enabled: false` leaves planning and restores its model and tools. `open_plan_review` opens the newest non-empty session-local plan while idle. A model's native plan proposal also opens a review.
+
+`plan_review_requested` carries `reviewId`, `sessionId`, the draft, allowed choices and selectable model tiers. `get_pending_plan_review` returns `{ review }` for reconnecting clients. Answer with `resolve_plan_review`, providing the same `sessionId` and `reviewId`, a `choice` (`execute`, `compact`, `keep`, `refine`, or `save`), optional `role`, and non-blank `feedback` for refinement. Its `{ accepted: true }` result acknowledges the answer; execution and settlement arrive separately. Only the first valid answer is accepted. Approval rereads the plan file so external edits are included.
+
+`execute` starts a fresh session while carrying local artifacts forward; `keep` preserves context; `compact` distills context first and skips execution if compaction is cancelled. `save` writes the suggested plan filename in the workspace and starts an empty session without executing. `plan_review_resolved` reports the accepted choice or cancellation. Session switches, aborts and transport shutdown invalidate pending answers. Resuming the saved session restores plan mode and its prior model/tool presentation. A review left waiting at disconnect or a session switch reopens with a fresh identity; an explicitly cancelled review stays closed. Drafts that were never submitted do not open automatically. `session_identity_changed` reports the committed `sessionId` and `sessionFile` when approval starts an empty session; hosts must update their resume reference before handling further work. Mode changes and session changes can return a busy error while a plan transition is restoring tools or models. These capabilities do not imply ACP support.
+
 ## Transport and Framing
 
 Protocol v1 stdout frames are a single JSON object followed by `\n`. The server caps each physical stdout frame at 1 MiB, including the newline. Inbound frames are always one unchunked JSONL object; clients SHOULD keep them within the advertised physical-frame limit. Input is not reassembled from `rpc_chunk` frames.

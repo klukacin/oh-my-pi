@@ -1,3 +1,4 @@
+import { SubagentUIBridge } from "@oh-my-pi/pi-coding-agent/extensibility/subagent-ui";
 /**
  * Tests for ExtensionRunner - conflict detection, error handling, tool wrapping.
  */
@@ -2264,7 +2265,9 @@ describe("ExtensionRunner", () => {
 				notify: { value: notify },
 			});
 			const uiContext: ExtensionUIContext = Object.create(uiPrototype);
-			initializeRunner(runner, uiContext);
+			const bridge = new SubagentUIBridge(() => uiContext);
+			const child = bridge.createScope({ agentId: "child", sessionId: "child-session" });
+			initializeRunner(runner, child.ui);
 			vi.useFakeTimers();
 			let now = 0;
 			const performanceNow = vi.spyOn(performance, "now").mockImplementation(() => now);

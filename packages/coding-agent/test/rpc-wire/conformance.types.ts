@@ -1,3 +1,9 @@
+import type {
+	PlanReviewRequestedEvent,
+	PlanReviewResolvedEvent,
+	PlanReviewOption,
+	PlanReviewTier,
+} from "../../src/extensibility/extensions/types";
 /**
  * Type-only conformance between the generated wire types (the contract client
  * libraries are generated from) and the server's own types. Checked by
@@ -52,6 +58,7 @@ import type {
 	RpcReadyFrame,
 	RpcResponse,
 	RpcSessionSettledFrame,
+	RpcSessionIdentityChangedFrame,
 	RpcSessionState,
 	RpcSubagentEventFrame,
 	RpcSubagentLifecycleFrame,
@@ -252,6 +259,11 @@ export type InboundSet = Assert<
 export type State = Assert<
 	AllTrue<{
 		sessionState: Outbound<RpcSessionState, Wire.SessionState>;
+		sessionIdentityChanged: Outbound<RpcSessionIdentityChangedFrame, Wire.SessionIdentityChangedEvent>;
+		planReviewRequested: Outbound<PlanReviewRequestedEvent, Wire.PlanReviewRequestedEvent>;
+		planReviewResolved: Outbound<PlanReviewResolvedEvent, Wire.PlanReviewResolvedEvent>;
+		planReviewOption: Outbound<PlanReviewOption, Wire.PlanReviewOption>;
+		planReviewTier: Outbound<PlanReviewTier, Wire.PlanReviewTier>;
 		queuedMessages: Outbound<RpcSessionState["queuedMessages"], Wire.QueuedMessagesState>;
 		dumpTool: Outbound<NonNullable<RpcSessionState["dumpTools"]>[number], Wire.ToolDescriptor>;
 		contextUsage: Outbound<ContextUsage, Wire.ContextUsage>;

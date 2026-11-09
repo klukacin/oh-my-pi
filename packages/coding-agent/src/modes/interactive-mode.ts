@@ -1,3 +1,12 @@
+import { shouldEnterPlanModeOnStartup } from "../plan-mode/startup";
+export { shouldEnterPlanModeOnStartup } from "../plan-mode/startup";
+import { validatePlanReviewChoice } from "../plan-mode/review-choice";
+import {
+	enterNativePlanMode,
+	tearDownNativePlanMode,
+	approveNativePlan,
+	type NativePlanHost,
+} from "../plan-mode/controller-operations";
 /**
  * Interactive mode for the coding agent.
  * Handles TUI rendering and user interaction, delegating business logic to AgentSession.
@@ -113,7 +122,7 @@ import type { FileSlashCommand } from "../extensibility/slash-commands";
 import { loadSlashCommands } from "../extensibility/slash-commands";
 import type { GoalModeState } from "../goals/state";
 import { rebindMemoryBackendForCwd } from "../hindsight/backend";
-import { copyLocalArtifacts, resolveLocalRoot } from "../internal-urls";
+import { resolveLocalRoot } from "../internal-urls";
 import { hasNativeJudge } from "../judgment";
 import { LSP_STARTUP_EVENT_CHANNEL, type LspStartupEvent } from "../lsp/startup-events";
 import type { MCPManager } from "../mcp";
@@ -124,7 +133,7 @@ import {
 	type McpConnectionFailure,
 	type McpConnectionStatusEvent,
 } from "../mcp/startup-events";
-import { humanizePlanTitle, type PlanApprovalDetails, resolvePlanTitle } from "../plan-mode/approved-plan";
+import { type PlanApprovalDetails, resolvePlanTitle } from "../plan-mode/approved-plan";
 import {
 	isJudgmentBatchProgress,
 	JUDGMENT_BATCH_PROGRESS_EVENT_CHANNEL,
@@ -132,12 +141,10 @@ import {
 } from "../eval/judgment-batch-events";
 import { onDownloadActivity } from "../downloads/activity";
 import { DownloadActivityHud, JudgmentBatchProgressHud } from "./progress-hud";
-import { autosaveApprovedPlan, planSaveFileName } from "../plan-mode/plan-autosave";
+import { planSaveFileName } from "../plan-mode/plan-autosave";
 import { resolvePlanModelTransition } from "../plan-mode/model-transition";
 import guidedGoalInterviewPrompt from "../prompts/goals/guided-goal-interview.md" with { type: "text" };
 import planFilenamePrompt from "../prompts/system/plan-filename.md" with { type: "text" };
-import planModeApprovedPrompt from "../prompts/system/plan-mode-approved.md" with { type: "text" };
-import planModeCompactInstructionsPrompt from "../prompts/system/plan-mode-compact-instructions.md" with { type: "text" };
 import type { AgentHubRegistry } from "@oh-my-pi/pi-tui/overlays/agent-hub-types";
 import { AgentRegistry, MAIN_AGENT_ID } from "../registry/agent-registry";
 import { registerPersistedSubagents } from "../registry/persisted-agents";
@@ -189,7 +196,6 @@ import {
 	parseConfiguredThinkingLevel,
 	resolveConfiguredThinkingLevel,
 } from "@oh-my-pi/pi-tui/thinking";
-import { isMCPToolName } from "../tools/builtin-names";
 import type { LspStartupServerInfo } from "../tools";
 import { resolvePlanFilePath } from "../plan-mode/plan-files";
 import { resolveToCwd } from "../tools/path-utils";
@@ -466,7 +472,7 @@ import { cfgCycleOrder, cfgModelRoles } from "../config/model-settings";
 import { cfgExtensionHandlersModeControl } from "../extensibility/settings";
 import { cfgGoalContinuationModes, cfgGoalEnabled } from "../goals/settings";
 import { goalContinuationActivity, goalFromModeData } from "../goals/state";
-import { cfgPlanDefaultOnStartup, cfgPlanEnabled } from "../plan-mode/settings";
+import { cfgPlanEnabled } from "../plan-mode/settings";
 import { cfgStreamRedactPatterns } from "../stream/settings";
 import { cfgSttEnabled } from "../stt/settings";
 import { combine, type SettingValueOf } from "../config/registry";
@@ -691,20 +697,6 @@ function readPersistedToolNames(value: unknown): string[] | undefined {
 	if (!Array.isArray(value)) return undefined;
 	if (!value.every(name => typeof name === "string")) return undefined;
 	return value as string[];
-}
-
-export function shouldEnterPlanModeOnStartup(
-	sessionManager: Pick<SessionManager, "buildSessionContext" | "getEntries">,
-	sessionSettings: Settings,
-): boolean {
-	const hasConversationContext = sessionManager.buildSessionContext().messages.length > 0;
-	const hasExplicitMode = sessionManager.getEntries().some(entry => entry.type === "mode_change");
-	return (
-		!hasConversationContext &&
-		!hasExplicitMode &&
-		cfgPlanDefaultOnStartup.get(sessionSettings) &&
-		cfgPlanEnabled.get(sessionSettings)
-	);
 }
 
 /** Options for creating an InteractiveMode instance (for future API use) */
@@ -6054,94 +6046,91 @@ export class InteractiveMode implements InteractiveModeContext {
 		}
 	}
 
+	#nativePlanHost(): NativePlanHost {
+		const owner = this;
+		return {
+			get session() {
+				return owner.session;
+			},
+			get sessionManager() {
+				return owner.sessionManager;
+			},
+			get planModeEnabled() {
+				return owner.planModeEnabled;
+			},
+			set planModeEnabled(value) {
+				owner.planModeEnabled = value;
+			},
+			get planModePaused() {
+				return owner.planModePaused;
+			},
+			set planModePaused(value) {
+				owner.planModePaused = value;
+			},
+			get planModePlanFilePath() {
+				return owner.planModePlanFilePath;
+			},
+			set planModePlanFilePath(value) {
+				owner.planModePlanFilePath = value;
+			},
+			get goalModeEnabled() {
+				return owner.goalModeEnabled;
+			},
+			get goalModePaused() {
+				return owner.goalModePaused;
+			},
+			get vibeModeEnabled() {
+				return owner.vibeModeEnabled;
+			},
+			get lastAssistantUsage() {
+				return owner.lastAssistantUsage;
+			},
+			set lastAssistantUsage(_value) {
+				owner.lastAssistantUsage = undefined;
+			},
+			get planModeHasEntered() {
+				return owner.#planModeHasEntered;
+			},
+			set planModeHasEntered(value) {
+				owner.#planModeHasEntered = value;
+			},
+			get planModePreviousToolPresentation() {
+				return owner.#planModePreviousToolPresentation;
+			},
+			set planModePreviousToolPresentation(value) {
+				owner.#planModePreviousToolPresentation = value;
+			},
+			get planModePreviousModelState() {
+				return owner.#planModePreviousModelState;
+			},
+			set planModePreviousModelState(value) {
+				owner.#planModePreviousModelState = value;
+			},
+			getPlanFilePath: owner.#getPlanFilePath.bind(owner),
+			applyPlanModeModel: owner.#applyPlanModeModel.bind(owner),
+			restorePlanPreviousModel: owner.#restorePlanPreviousModel.bind(owner),
+			clearPendingPlanModelSwitch: owner.#clearPendingPlanModelSwitch.bind(owner),
+			updatePlanModeStatus: owner.#updatePlanModeStatus.bind(owner),
+			exitPlanMode: owner.#exitPlanMode.bind(owner),
+			resolveLocalRoot: owner.#resolveLocalRoot.bind(owner),
+			resolvePlanFilePath: owner.#resolvePlanFilePath.bind(owner),
+			applyDeferredPlanModelTransition: owner.#applyDeferredPlanModelTransition.bind(owner),
+			applyPlanExecutionModel: owner.#applyPlanExecutionModel.bind(owner),
+			hidePlanReview: owner.#hidePlanReview.bind(owner),
+			showStatus: owner.showStatus.bind(owner),
+			showWarning: owner.showWarning.bind(owner),
+			handleClearCommand: owner.handleClearCommand.bind(owner),
+			handleCompactCommand: owner.handleCompactCommand.bind(owner),
+			ui: this.ui,
+		};
+	}
+
 	async #enterPlanMode(options?: {
 		planFilePath?: string;
 		workflow?: "parallel" | "iterative";
 		preserveRestoredModel?: boolean;
 	}): Promise<void> {
-		if (this.planModeEnabled) {
-			return;
-		}
-		if (this.goalModeEnabled || this.goalModePaused) {
-			this.showWarning("Exit goal mode first.");
-			return;
-		}
-		if (this.vibeModeEnabled) {
-			this.showWarning("Exit vibe mode first.");
-			return;
-		}
-
-		this.planModePaused = false;
-
-		const planFilePath = options?.planFilePath ?? (await this.#getPlanFilePath());
-		const previousTools = this.session.getEnabledToolNames();
-		const previousMountedTools = this.session.getMountedXdevToolNames();
-		// `plan-mode-active.md` instructs the agent to draft the plan file with
-		// `write` and refine it with `edit`, and plan approval itself is a `write`
-		// to `xd://propose`. Both must be in the active set or the agent falls
-		// back to `edit` on a non-existent file and stalls — and cannot submit the plan.
-		// `edit` is an essential built-in and always ships top-level; re-activate
-		// `write` here only when the current registry entry is the built-in write
-		// tool (issue #3165). A shadowing extension tool named `write` must stay
-		// inactive because plan mode's read-only guarantee relies on the built-in
-		// write/edit guard. The standing handler below consumes plan-approval
-		// dispatches.
-		const planAugmentations: string[] = [];
-		// A shadowing extension tool named `write` has no `xd://` transport, so plan
-		// approval would never dispatch and the turn would loop on propose writes
-		// forever (issue #14030). Drop it from the active set rather than carrying it
-		// over: keeping it active breaks both the read-only guarantee and approval.
-		if (this.session.hasBuiltInTool("write")) {
-			planAugmentations.push("write");
-		} else if (previousTools.includes("write")) {
-			this.showWarning(
-				"Plan mode: the `write` tool is provided by an extension and cannot submit plans. Disable it to use plan mode.",
-			);
-		}
-		const uniquePlanTools = [...new Set([...previousTools.filter(name => name !== "write"), ...planAugmentations])];
-
-		this.#planModePreviousToolPresentation = {
-			enabled: previousTools.filter(name => !isMCPToolName(name)),
-			mounted: previousMountedTools.filter(name => !isMCPToolName(name)),
-			registered: this.session.getAllToolNames(),
-		};
-		this.planModePlanFilePath = planFilePath;
-		this.planModeEnabled = true;
-		// Suppress cache-miss marker on the next turn: plan mode changes the system
-		// prompt, which predictably invalidates the cache.
-		this.lastAssistantUsage = undefined;
-
-		// Plan mode state must land before the tool partition: it keeps `write`
-		// active as the staging transport, and plan approval is a top-level
-		// `write` to `xd://propose`.
-		const previousPlanModeState = this.session.getPlanModeState();
-		this.session.setPlanModeState({
-			enabled: true,
-			planFilePath,
-			workflow: options?.workflow ?? "parallel",
-			reentry: this.#planModeHasEntered,
-		});
-		try {
-			await this.session.setActiveToolsByName(uniquePlanTools);
-		} catch (error) {
-			this.session.setPlanModeState(previousPlanModeState);
-			this.planModeEnabled = false;
-			throw error;
-		}
-		this.session.setPlanProposalHandler?.(title => this.session.preparePlanForReview(title));
-		if (this.session.isStreaming) {
-			await this.session.sendPlanModeContext({ deliverAs: "steer" });
-		}
-		this.#planModeHasEntered = true;
-		// Session loading already restored the model recorded in the journal.
-		// Reapplying today's plan role here would replace a CLI/session-specific
-		// selection with current config during --resume or an in-process switch.
-		if (!options?.preserveRestoredModel) {
-			await this.#applyPlanModeModel();
-		}
-		this.#updatePlanModeStatus();
-		this.sessionManager.appendModeChange("plan", { planFilePath });
-		this.showStatus(`Plan mode enabled. Plan file: ${planFilePath}`);
+		return enterNativePlanMode(this.#nativePlanHost(), options);
 	}
 
 	async #restorePlanPreviousModel(prev: { model: Model; thinkingLevel?: ConfiguredThinkingLevel }): Promise<void> {
@@ -6209,84 +6198,7 @@ export class InteractiveMode implements InteractiveModeContext {
 		paused?: boolean;
 		deferModelRestore?: boolean;
 	}): Promise<void> {
-		const planModeState = this.session.getPlanModeState();
-		const planModeTools = this.session.getEnabledToolNames();
-		const planModeMountedTools = this.session.getMountedXdevToolNames();
-		const planModeModelState = this.session.model
-			? {
-					model: this.session.model,
-					thinkingLevel: this.session.configuredThinkingLevel(),
-				}
-			: undefined;
-		this.session.setPlanModeState(undefined);
-		try {
-			const previousPresentation = this.#planModePreviousToolPresentation;
-			if (previousPresentation) {
-				await this.session.restoreNonMCPToolPresentation(
-					previousPresentation.enabled,
-					previousPresentation.mounted,
-					previousPresentation.registered,
-				);
-			}
-			if (this.#planModePreviousModelState && !options?.deferModelRestore) {
-				await this.#restorePlanPreviousModel(this.#planModePreviousModelState);
-			}
-			// If #applyPlanModeModel queued a deferred switch to the plan-role model
-			// (because the session was streaming on entry), drop it now: we are
-			// leaving plan mode, so flushing it on the next agent_end would land the
-			// session on the plan-role model after the user has exited plan mode
-			// (issue #816). This runs even when deferModelRestore is set
-			// (compact-approval path): otherwise the stale plan switch survives and
-			// flushPendingModelSwitch() later clobbers the restored/execution model.
-			if (this.#planModePreviousModelState) this.#clearPendingPlanModelSwitch();
-		} catch (error) {
-			this.session.setPlanModeState(planModeState);
-			if (
-				planModeModelState &&
-				(!modelsAreEqual(this.session.model, planModeModelState.model) ||
-					this.session.configuredThinkingLevel() !== planModeModelState.thinkingLevel)
-			) {
-				try {
-					await this.#restorePlanPreviousModel(planModeModelState);
-				} catch (rollbackError) {
-					logger.warn("Failed to restore plan model after plan exit failure", {
-						error: String(rollbackError),
-					});
-				}
-			}
-			const enabledTools = this.session.getEnabledToolNames();
-			const mountedTools = this.session.getMountedXdevToolNames();
-			if (
-				enabledTools.length !== planModeTools.length ||
-				enabledTools.some((name, index) => name !== planModeTools[index]) ||
-				mountedTools.length !== planModeMountedTools.length ||
-				mountedTools.some((name, index) => name !== planModeMountedTools[index])
-			) {
-				try {
-					await this.session.setActiveToolPresentation(planModeTools, planModeMountedTools);
-				} catch (rollbackError) {
-					logger.warn("Failed to restore plan tools after plan exit failure", {
-						error: String(rollbackError),
-					});
-				}
-			}
-			throw error;
-		}
-		this.session.setPlanProposalHandler?.(null);
-		this.planModeEnabled = false;
-		// Suppress cache-miss marker on the next turn: plan exit changes the system
-		// prompt, which predictably invalidates the cache.
-		this.lastAssistantUsage = undefined;
-		this.planModePaused = options?.paused ?? false;
-		this.planModePlanFilePath = undefined;
-		this.#planModePreviousToolPresentation = undefined;
-		if (!options?.deferModelRestore) this.#planModePreviousModelState = undefined;
-		this.#updatePlanModeStatus();
-		const paused = options?.paused ?? false;
-		this.sessionManager.appendModeChange(paused ? "plan_paused" : "none");
-		if (!options?.silent) {
-			this.showStatus(paused ? "Plan mode paused." : "Plan mode disabled.");
-		}
+		return tearDownNativePlanMode(this.#nativePlanHost(), options);
 	}
 
 	/**
@@ -6556,9 +6468,8 @@ export class InteractiveMode implements InteractiveModeContext {
 		const pick = this.#planReviewPick;
 		if (!pending || pending.request.reviewId !== reviewId || !pick) return false;
 		const option = pending.request.options.find(item => item.id === choice);
-		if (!option || option.disabled) return false;
+		if (!option || !validatePlanReviewChoice(pending.request, choice, input)) return false;
 		const feedback = input?.feedback;
-		if (choice === "refine" && !feedback?.trim()) return false;
 		if (input?.role !== undefined) {
 			const approves = choice === "execute" || choice === "compact" || choice === "keep";
 			if (!approves || !pending.selectTier?.(input.role)) return false;
@@ -6856,194 +6767,9 @@ export class InteractiveMode implements InteractiveModeContext {
 			reviewOwner: object;
 		},
 	): Promise<boolean> {
-		const previousPresentation = this.#planModePreviousToolPresentation ?? {
-			enabled: this.session.getEnabledToolNames().filter(name => !isMCPToolName(name)),
-			mounted: this.session.getMountedXdevToolNames().filter(name => !isMCPToolName(name)),
-			registered: this.session.getAllToolNames(),
-		};
-
-		// Mark the pending abort caused by the plan-mode → compaction transition as
-		// silent BEFORE #exitPlanMode raises it. The `finally` below clears the
-		// flag on every terminal compaction outcome (ok / cancelled / failed /
-		// throw) so a leaked flag cannot silence a later unrelated abort.
-		// Branchless mark+clear when !compactBeforeExecute: mark is gated; clear
-		// is unconditional and idempotent.
-		if (options.compactBeforeExecute) {
-			this.session.markPlanInternalAbortPending();
-		}
-		let compactOutcome: CompactionOutcome | undefined;
-		try {
-			await this.#exitPlanMode({
-				silent: true,
-				paused: false,
-				deferModelRestore: options.compactBeforeExecute === true,
-			});
-
-			if (!options.preserveContext) {
-				const oldLocalRoot = this.#resolveLocalRoot();
-				await this.handleClearCommand();
-				const newLocalRoot = this.#resolveLocalRoot();
-				await copyLocalArtifacts(oldLocalRoot, newLocalRoot);
-				const newLocalPath = this.#resolvePlanFilePath(options.planFilePath);
-				await fs.mkdir(path.dirname(newLocalPath), { recursive: true });
-				await fs.writeFile(newLocalPath, planContent);
-			} else if (options.compactBeforeExecute) {
-				// Distill the plan-mode transcript before the execution turn is queued so
-				// the plan-approved synthetic prompt lands as a fresh cache anchor.
-				// Outcome is consumed after tool-restoration and plan-reference-path
-				// bookkeeping below; `markPlanReferenceSent` is intentionally deferred
-				// past the cancel guard — see the comment at the cancel branch.
-				// Cancellation skips the synthetic-prompt dispatch (operator's explicit
-				// abort is honored); failure proceeds best-effort — approval intent stands.
-				const compactionPrompt = prompt.render(planModeCompactInstructionsPrompt, {
-					planFilePath: options.planFilePath,
-				});
-				// Pin the plan reference path BEFORE compaction so any user messages
-				// queued during the compaction await (which `handleCompactCommand`
-				// flushes via `flushCompactionQueue` before returning) see the
-				// approved plan in `#buildPlanReferenceMessage`. Reassignment after
-				// the try/finally is idempotent and kept for the !compactBeforeExecute
-				// branch.
-				this.session.setPlanReferencePath(options.planFilePath);
-				// Ride the plan-mode distillation prompt through as `internalGuidance`
-				// so it reaches native summarization without leaking into the public
-				// `customInstructions` channel on `session_before_compact` — extensions
-				// there treat that field as user focus and would query-bias the
-				// summary toward the plan boilerplate (issue #4359). The model the
-				// transition below restores reads the summary.
-				const readerModel =
-					options.executionModel?.model ?? this.#planModePreviousModelState?.model ?? this.session.model;
-				compactOutcome = await this.handleCompactCommand(
-					undefined,
-					undefined,
-					outcome => this.#applyDeferredPlanModelTransition(outcome, options.executionModel),
-					{ internalGuidance: compactionPrompt, readerModel },
-				);
-			}
-		} finally {
-			// Unconditional clear. Idempotent: a no-op when the flag was never set
-			// (i.e., the !compactBeforeExecute branch), and a no-op when the flag
-			// was already consumed by AgentSession.#handleAgentEvent's aborted
-			// message_end stamping. Guarantees the flag is dead at every exit.
-			this.session.clearPlanInternalAbortPending();
-		}
-
-		// Restore the execution tool set, but force-enable `read` so the durable
-		// local:// plan remains available if the inline copy becomes unrecoverable.
-		const executionTools = previousPresentation.enabled.includes("read")
-			? previousPresentation.enabled
-			: [...previousPresentation.enabled, "read"];
-		await this.session.restoreNonMCPToolPresentation(
-			executionTools,
-			previousPresentation.mounted,
-			previousPresentation.registered,
-		);
-		this.session.setPlanReferencePath(options.planFilePath);
-		try {
-			const autosaved = await autosaveApprovedPlan({
-				settings: this.session.settings,
-				cwd: this.sessionManager.getCwd(),
-				title: options.title,
-				planContent,
-			});
-			if (autosaved) {
-				const displayPath = truncateToWidth(replaceTabs(shortenPath(autosaved)), TRUNCATE_LENGTHS.CONTENT);
-				this.showStatus(`Saved plan to ${displayPath}.`);
-			}
-		} catch (error) {
-			const detail = truncateToWidth(
-				shortenEmbeddedPaths(
-					replaceTabs(error instanceof Error ? error.message : String(error))
-						.replace(/[\r\n]+/g, " ")
-						.trim(),
-				),
-				TRUNCATE_LENGTHS.CONTENT,
-			);
-			this.showWarning(`Failed to autosave plan: ${detail}`);
-		}
-
-		// Resolve the deferred plan-approval model transition. On the compact path
-		// the before-flush hook passed to handleCompactCommand already ran this (so
-		// any input queued during compaction executed on the post-compaction
-		// model); the re-run here is idempotent and covers the short-circuit where
-		// compaction never executed. It runs for "cancelled" too — the operator
-		// aborted only the compaction, not the approval — so the next turn no longer
-		// lands on the plan model. "failed" stays on the plan model (context
-		// intact) and dispatches best-effort.
-		if (options.compactBeforeExecute) {
-			await this.#applyDeferredPlanModelTransition(compactOutcome, options.executionModel);
-		} else {
-			await this.#applyPlanExecutionModel(options.executionModel);
-		}
-
-		if (compactOutcome === "cancelled") {
-			// Explicit abort: honor it. `executeCompaction` already surfaced
-			// `showError("Compaction cancelled")`; we add the deferred-dispatch
-			// warning and exit without dispatching the synthetic plan-approved
-			// prompt. `markPlanReferenceSent` stays unset so
-			// `AgentSession.#buildPlanReferenceMessage` injects the plan reference
-			// on the operator's next `prompt()` call.
-			this.showWarning(
-				"Plan approved, but compaction was cancelled — execution not dispatched. Submit a turn to continue.",
-			);
-			return false;
-		}
-
-		// Approved plans land in a fresh (or compacted) session whose first user-visible
-		// turn is the synthetic plan-approved prompt — that path bypasses the
-		// input-controller's title generation. Seed an auto-name from the plan title
-		// so the session is not left unnamed. `setSessionName("auto")` is a no-op
-		// when the user has already chosen a name (preserveContext paths).
-		const seededName = humanizePlanTitle(options.title);
-		if (seededName && !this.sessionManager.getSessionName()) {
-			await this.sessionManager.setSessionName(seededName, "auto");
-		}
-
-		// markPlanReferenceSent fires only on the dispatch path so the synthetic
-		// plan-approved prompt is the source of the reference injection.
-		this.session.markPlanReferenceSent();
-		const planModePrompt = prompt.render(planModeApprovedPrompt, {
-			planFilePath: options.planFilePath,
-			planContent,
-			contextPreserved: options.preserveContext === true,
-		});
-		// Close the review overlay only now — after the async title write and plan
-		// prompt are prepared, immediately before the execution turn is queued. The
-		// synthetic prompt below blocks in `session.prompt` for the whole run, so
-		// hiding here (rather than after #approvePlan returns) keeps the operator off
-		// the stale plan-review screen (issue #5688) while #5319's stale-buffer guard
-		// stays intact. Deferring the hide past the awaited `setSessionName` also
-		// prevents restored editor focus from letting operator keystrokes submit a
-		// normal turn ahead of the approved execution turn (PR #5689 review).
-		// The ownership-bound hide is idempotent, so the caller's trailing
-		// `closePlanReview()` — and a stale continuation after a replacement review
-		// opened — stay safe no-ops.
-		this.#hidePlanReview(options.reviewOwner);
-		this.ui.requestRender();
-		// A user turn queued during compaction was already fired by
-		// `flushCompactionQueue` before we returned from `handleCompactCommand`; the
-		// old abort-then-prompt path would have discarded that operator turn AND
-		// still surfaced `AgentBusyError` when the queued turn kicked off in the
-		// synchronous gap. Preserve the in-flight work and queue the hidden
-		// execution directive behind it as a synthetic follow-up. If `isStreaming`
-		// flips true between the check and dispatch (the same fire-and-forget race
-		// noted below), catch `AgentBusyError` and fall back to the same queue.
-		if (this.session.isStreaming) {
-			await this.session.followUp(planModePrompt, undefined, {
-				synthetic: true,
-			});
-		} else {
-			try {
-				await this.session.prompt(planModePrompt, { synthetic: true });
-			} catch (error) {
-				if (!(error instanceof AgentBusyError)) throw error;
-				await this.session.followUp(planModePrompt, undefined, {
-					synthetic: true,
-				});
-			}
-		}
-		return true;
+		return approveNativePlan(this.#nativePlanHost(), planContent, options);
 	}
+
 	async #abortPlanApprovalTurnSilently(): Promise<void> {
 		this.session.markPlanInternalAbortPending();
 		try {

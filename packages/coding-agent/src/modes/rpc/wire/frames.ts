@@ -6,8 +6,34 @@ import { absentAs, doc, type WireDefs } from "./dsl";
 
 const JSON_OBJECT = "Record<string, unknown>";
 const UI = "'extension_ui_request'";
+const CHILD_UI = { "subagent?": "SubagentUIIdentity", "rootSessionId?": "string" };
 
 export const frameDefs = {
+	SessionIdentityChangedEvent: doc(
+		{ type: "'session_identity_changed'", sessionId: "string", sessionFile: "string" },
+		"The active session identity changed after a native operation committed; replace the previous session reference.",
+	),
+	SubagentUIIdentity: { agentId: "string", "parentAgentId?": "string", sessionId: "string" },
+	PlanReviewChoice: "'execute' | 'compact' | 'keep' | 'refine' | 'save'",
+	PlanReviewOption: { id: "PlanReviewChoice", label: "string", disabled: "boolean" },
+	PlanReviewTier: { role: "string", provider: "string", model: "string", "thinkingLevel?": "ConfiguredThinkingLevel" },
+	PlanReviewRequestedEvent: {
+		type: "'plan_review_requested'",
+		reviewId: "string",
+		sessionId: "string",
+		title: "string",
+		planFilePath: "string",
+		planContent: "string",
+		options: "PlanReviewOption[]",
+		"tiers?": "PlanReviewTier[]",
+	},
+	PlanReviewResolvedEvent: {
+		type: "'plan_review_resolved'",
+		reviewId: "string",
+		sessionId: "string",
+		"choice?": "PlanReviewChoice",
+		by: "'local' | 'extension'",
+	},
 	ReadyEvent: doc(
 		{
 			type: "'ready'",
@@ -160,6 +186,7 @@ export const frameDefs = {
 		"One question of an `ask` request; hosts always offer free text besides `options`.",
 	),
 	SelectUiRequest: {
+		...CHILD_UI,
 		type: UI,
 		id: "string",
 		method: "'select'",
@@ -169,6 +196,7 @@ export const frameDefs = {
 		"timeout?": "number.integer",
 	},
 	ConfirmUiRequest: {
+		...CHILD_UI,
 		type: UI,
 		id: "string",
 		method: "'confirm'",
@@ -177,6 +205,7 @@ export const frameDefs = {
 		"timeout?": "number.integer",
 	},
 	InputUiRequest: {
+		...CHILD_UI,
 		type: UI,
 		id: "string",
 		method: "'input'",
@@ -186,6 +215,7 @@ export const frameDefs = {
 		"secret?": "boolean",
 	},
 	EditorUiRequest: {
+		...CHILD_UI,
 		type: UI,
 		id: "string",
 		method: "'editor'",
@@ -194,14 +224,22 @@ export const frameDefs = {
 		"promptStyle?": "boolean",
 	},
 	AskUiRequest: doc(
-		{ type: UI, id: "string", method: "'ask'", questions: "AskQuestion[]", "timeout?": "number.integer" },
+		{
+			...CHILD_UI,
+			type: UI,
+			id: "string",
+			method: "'ask'",
+			questions: "AskQuestion[]",
+			"timeout?": "number.integer",
+		},
 		"Every question of one `ask` tool call; sent only after `set_ask_dialog` enables it.",
 	),
 	CancelUiRequest: doc(
-		{ type: UI, id: "string", method: "'cancel'", targetId: "string" },
+		{ ...CHILD_UI, type: UI, id: "string", method: "'cancel'", targetId: "string" },
 		"Close the dialog opened by request `targetId`; a later answer to it is ignored.",
 	),
 	NotifyUiRequest: {
+		...CHILD_UI,
 		type: UI,
 		id: "string",
 		method: "'notify'",
@@ -209,6 +247,7 @@ export const frameDefs = {
 		"notifyType?": "NotifyType",
 	},
 	SetStatusUiRequest: {
+		...CHILD_UI,
 		type: UI,
 		id: "string",
 		method: "'setStatus'",
@@ -216,6 +255,7 @@ export const frameDefs = {
 		"statusText?": "string",
 	},
 	SetWidgetUiRequest: {
+		...CHILD_UI,
 		type: UI,
 		id: "string",
 		method: "'setWidget'",
@@ -223,9 +263,10 @@ export const frameDefs = {
 		"widgetLines?": "string[]",
 		"widgetPlacement?": "WidgetPlacement",
 	},
-	SetTitleUiRequest: { type: UI, id: "string", method: "'setTitle'", title: "string" },
-	SetEditorTextUiRequest: { type: UI, id: "string", method: "'set_editor_text'", text: "string" },
+	SetTitleUiRequest: { ...CHILD_UI, type: UI, id: "string", method: "'setTitle'", title: "string" },
+	SetEditorTextUiRequest: { ...CHILD_UI, type: UI, id: "string", method: "'set_editor_text'", text: "string" },
 	OpenUrlUiRequest: {
+		...CHILD_UI,
 		type: UI,
 		id: "string",
 		method: "'open_url'",

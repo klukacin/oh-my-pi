@@ -17,7 +17,7 @@ import type {
 	ToolExample,
 } from "@oh-my-pi/pi-ai";
 import type { BashResult } from "../../exec/bash-executor";
-import type { ContextUsage } from "../../extensibility/extensions/types";
+import type { ContextUsage, PlanReviewChoice, PlanReviewRequestedEvent } from "../../extensibility/extensions/types";
 import type { AgentSessionEvent, SessionStats } from "../../session/agent-session";
 import type { SessionLeaseReport } from "../../session/session-storage";
 import type { RestoredQueuedMessage } from "../../session/agent-session-types";
@@ -63,6 +63,18 @@ export type RpcCommand =
 
 	// State
 	| { id?: string; type: "get_state" }
+	| { id?: string; type: "set_plan_mode"; enabled: boolean }
+	| { id?: string; type: "open_plan_review" }
+	| { id?: string; type: "get_pending_plan_review" }
+	| {
+			id?: string;
+			type: "resolve_plan_review";
+			sessionId: string;
+			reviewId: string;
+			choice: PlanReviewChoice;
+			feedback?: string;
+			role?: string;
+	  }
 	| { id?: string; type: "set_fast_mode"; enabled: boolean }
 	| { id?: string; type: "set_slow_mode"; enabled: boolean }
 	| {
@@ -171,6 +183,9 @@ export type RpcCommand =
 // ============================================================================
 
 export interface RpcSessionState {
+	capabilities?: { nativePlanReview: 1; childApprovals: 0 | 1 };
+	planMode?: { enabled: boolean; paused: boolean; planFilePath?: string };
+	pendingPlanReview?: PlanReviewRequestedEvent;
 	model?: Model;
 	thinkingLevel: ThinkingLevel | undefined;
 	isStreaming: boolean;
@@ -268,6 +283,12 @@ export interface RpcPromptResultFrame {
 	 * When false, a {@link RpcSessionSettledFrame} follows once that work is done.
 	 */
 	sessionSettled: boolean;
+}
+
+export interface RpcSessionIdentityChangedFrame {
+	type: "session_identity_changed";
+	sessionId: string;
+	sessionFile: string;
 }
 
 /**
@@ -463,6 +484,22 @@ export type RpcResponse =
 
 	// State
 	| { id?: string; type: "response"; command: "get_state"; success: true; data: RpcSessionState }
+	| {
+			id?: string;
+			type: "response";
+			command: "set_plan_mode";
+			success: true;
+			data: { enabled: boolean; paused: boolean; planFilePath?: string };
+	  }
+	| { id?: string; type: "response"; command: "open_plan_review"; success: true; data: { opened: boolean } }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_pending_plan_review";
+			success: true;
+			data: { review: PlanReviewRequestedEvent | null };
+	  }
+	| { id?: string; type: "response"; command: "resolve_plan_review"; success: true; data: { accepted: boolean } }
 	| {
 			id?: string;
 			type: "response";
@@ -789,7 +826,10 @@ export interface RpcAskDialogQuestion {
 }
 
 /** Emitted when an extension needs user input */
-export type RpcExtensionUIRequest =
+export type RpcExtensionUIRequest = {
+	subagent?: { agentId: string; parentAgentId?: string; sessionId: string };
+	rootSessionId?: string;
+} & (
 	| {
 			type: "extension_ui_request";
 			id: string;
@@ -862,7 +902,8 @@ export type RpcExtensionUIRequest =
 			 */
 			launchUrl?: string;
 			instructions?: string;
-	  };
+	  }
+);
 
 // ============================================================================
 // Host Tool Frames (bidirectional)
