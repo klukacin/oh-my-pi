@@ -3270,6 +3270,117 @@ pub struct CompactionResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettingOption {
+	pub value: String,
+	pub label: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub description: Option<String>,
+}
+
+/// A setting as the interactive `/settings` panel defines it, with its stored value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettingEntry {
+	pub path: String,
+	pub tab: String,
+	/// Control the setting edits with.
+	pub kind: SettingEntryKind,
+	/// Schema type of the stored value.
+	#[serde(rename = "valueType")]
+	pub value_type: String,
+	pub label: String,
+	pub description: String,
+	#[serde(rename = "isSet")]
+	pub is_set: bool,
+	/// False while another setting the entry depends on hides it.
+	pub visible: bool,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub group: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub warning: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub options: Option<Vec<SettingOption>>,
+	/// A credential: `value` is withheld; `isSet` says whether one is stored.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub secret: Option<bool>,
+	/// Order of a `multiselect` value is meaningful.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub ordered: Option<bool>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub value: Option<Value>,
+	#[serde(rename = "defaultValue", default, skip_serializing_if = "Option::is_none")]
+	pub default_value: Option<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettingsTab {
+	pub id: String,
+	pub label: String,
+	/// Section headings in display order.
+	pub groups: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SettingsState {
+	pub tabs: Vec<SettingsTab>,
+	pub settings: Vec<SettingEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ModelRoleScope {
+	#[serde(rename = "global")]
+	Global,
+	#[serde(rename = "project")]
+	Project,
+}
+
+impl ModelRoleScope {
+	/// Wire value.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Global => "global",
+			Self::Project => "project",
+		}
+	}
+}
+
+/// One model role and what each settings layer assigns it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelRole {
+	pub role: String,
+	pub name: String,
+	/// `kind` roles take an image, search, speech or judge model.
+	pub section: ModelRoleSection,
+	/// Settings layer the effective selector comes from.
+	pub provenance: String,
+	/// `provider/id` of every available model the role accepts.
+	pub models: Vec<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub tag: Option<String>,
+	/// Selector stored in the global config.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub global: Option<String>,
+	/// Selector stored in the current project's config.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub project: Option<String>,
+	/// Selector in effect after layering.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub effective: Option<String>,
+	/// `provider/id` the effective selector resolves to.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub resolved: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelRolesState {
+	/// Whether role edits may target the project layer.
+	pub storage: ModelRoleScope,
+	pub roles: Vec<ModelRole>,
+	/// `provider/id` the session is running.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub active: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelCycleResult {
 	pub model: ModelInfo,
 	#[serde(rename = "isScoped")]
@@ -5764,6 +5875,27 @@ pub struct GetSessionLeaseResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetSettingParams {
+	pub path: String,
+	#[serde(deserialize_with = "Deserialize::deserialize")]
+	pub value: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnsetSettingParams {
+	pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetModelRoleParams {
+	pub role: String,
+	#[serde(deserialize_with = "Deserialize::deserialize")]
+	pub model: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub scope: Option<ModelRoleScope>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExportHtmlParams {
 	#[serde(rename = "outputPath", default, skip_serializing_if = "Option::is_none")]
 	pub output_path: Option<String>,
@@ -6162,6 +6294,54 @@ impl<'de> Deserialize<'de> for LitCompleted {
 			Ok(Self)
 		} else {
 			Err(D::Error::custom(format!("expected \"completed\", got {value}")))
+		}
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SettingEntryKind {
+	#[serde(rename = "boolean")]
+	Boolean,
+	#[serde(rename = "enum")]
+	Enum,
+	#[serde(rename = "submenu")]
+	Submenu,
+	#[serde(rename = "text")]
+	Text,
+	#[serde(rename = "multiselect")]
+	Multiselect,
+	#[serde(rename = "providerLimits")]
+	ProviderLimits,
+}
+
+impl SettingEntryKind {
+	/// Wire value.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Boolean => "boolean",
+			Self::Enum => "enum",
+			Self::Submenu => "submenu",
+			Self::Text => "text",
+			Self::Multiselect => "multiselect",
+			Self::ProviderLimits => "providerLimits",
+		}
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ModelRoleSection {
+	#[serde(rename = "chat")]
+	Chat,
+	#[serde(rename = "kind")]
+	Kind,
+}
+
+impl ModelRoleSection {
+	/// Wire value.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Chat => "chat",
+			Self::Kind => "kind",
 		}
 	}
 }
@@ -7353,6 +7533,88 @@ impl Command for GetSessionLeaseCommand {
 
 	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
 		serde_json::from_value::<GetSessionLeaseResult>(data.unwrap_or_else(|| Value::Object(Map::new())))
+	}
+}
+
+/// Every setting the interactive panel shows, with its value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct GetSettingsCommand {}
+
+impl Command for GetSettingsCommand {
+	const NAME: &'static str = "get_settings";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = SettingsState;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<SettingsState>(data.unwrap_or_else(|| Value::Object(Map::new())))
+	}
+}
+
+/// Write one setting to the global config.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetSettingCommand {
+	pub path: String,
+	#[serde(deserialize_with = "Deserialize::deserialize")]
+	pub value: Value,
+}
+
+impl Command for SetSettingCommand {
+	const NAME: &'static str = "set_setting";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = SettingEntry;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<SettingEntry>(data.unwrap_or_else(|| Value::Object(Map::new())))
+	}
+}
+
+/// Remove one setting from the global config so another layer or its default applies.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UnsetSettingCommand {
+	pub path: String,
+}
+
+impl Command for UnsetSettingCommand {
+	const NAME: &'static str = "unset_setting";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = SettingEntry;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<SettingEntry>(data.unwrap_or_else(|| Value::Object(Map::new())))
+	}
+}
+
+/// Model role assignments per settings layer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct GetModelRolesCommand {}
+
+impl Command for GetModelRolesCommand {
+	const NAME: &'static str = "get_model_roles";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = ModelRolesState;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<ModelRolesState>(data.unwrap_or_else(|| Value::Object(Map::new())))
+	}
+}
+
+/// Assign a model selector to a role, or clear it with `null`. The default role also switches the running session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetModelRoleCommand {
+	pub role: String,
+	#[serde(deserialize_with = "Deserialize::deserialize")]
+	pub model: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub scope: Option<ModelRoleScope>,
+}
+
+impl Command for SetModelRoleCommand {
+	const NAME: &'static str = "set_model_role";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = ModelRolesState;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<ModelRolesState>(data.unwrap_or_else(|| Value::Object(Map::new())))
 	}
 }
 

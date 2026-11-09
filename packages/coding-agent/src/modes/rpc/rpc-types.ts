@@ -140,6 +140,13 @@ export type RpcCommand =
 	// Session
 	| { id?: string; type: "get_session_stats" }
 	| { id?: string; type: "get_session_lease"; sessionIds: string[] }
+
+	// Settings and model roles
+	| { id?: string; type: "get_settings" }
+	| { id?: string; type: "set_setting"; path: string; value: unknown }
+	| { id?: string; type: "unset_setting"; path: string }
+	| { id?: string; type: "get_model_roles" }
+	| { id?: string; type: "set_model_role"; role: string; model: string | null; scope?: RpcModelRoleScope }
 	| { id?: string; type: "export_html"; outputPath?: string }
 	| { id?: string; type: "switch_session"; sessionPath: string; provider?: string; modelId?: string }
 	| { id?: string; type: "branch"; entryId: string }
@@ -181,6 +188,80 @@ export type RpcCommand =
 // ============================================================================
 // RPC State
 // ============================================================================
+
+/** One choice of an enumerated setting. */
+export interface RpcSettingOption {
+	value: string;
+	label: string;
+	description?: string;
+}
+
+/** A setting as the interactive `/settings` panel defines it, with its stored value. */
+export interface RpcSettingEntry {
+	path: string;
+	tab: string;
+	group?: string;
+	/** Control the setting edits with. */
+	kind: "boolean" | "enum" | "submenu" | "text" | "multiselect" | "providerLimits";
+	/** Schema type of the stored value. */
+	valueType: string;
+	label: string;
+	description: string;
+	warning?: string;
+	options?: RpcSettingOption[];
+	/** A credential: `value` and `defaultValue` are withheld, `isSet` says whether one is stored. */
+	secret?: boolean;
+	/** Order of a `multiselect` value is meaningful. */
+	ordered?: boolean;
+	value?: unknown;
+	defaultValue?: unknown;
+	isSet: boolean;
+	/** False while another setting the entry depends on hides it. */
+	visible: boolean;
+}
+
+export interface RpcSettingsTab {
+	id: string;
+	label: string;
+	/** Section headings in display order. */
+	groups: string[];
+}
+
+export interface RpcSettingsState {
+	tabs: RpcSettingsTab[];
+	settings: RpcSettingEntry[];
+}
+
+export type RpcModelRoleScope = "global" | "project";
+
+/** One model role and what each settings layer assigns it. */
+export interface RpcModelRole {
+	role: string;
+	name: string;
+	tag?: string;
+	/** `chat` roles take a chat model; `kind` roles take an image, search, speech or judge model. */
+	section: "chat" | "kind";
+	/** Selector stored in the global config. */
+	global?: string;
+	/** Selector stored in the current project's config. */
+	project?: string;
+	/** Selector in effect after layering. */
+	effective?: string;
+	/** `provider/id` the effective selector resolves to among available models. */
+	resolved?: string;
+	/** Settings layer the effective selector comes from. */
+	provenance: string;
+	/** `provider/id` of every available model the role accepts. */
+	models: string[];
+}
+
+export interface RpcModelRolesState {
+	/** Whether role edits may target the project layer (`modelRoleStorage`). */
+	storage: RpcModelRoleScope;
+	/** `provider/id` the session is running. */
+	active?: string;
+	roles: RpcModelRole[];
+}
 
 export interface RpcSessionState {
 	capabilities?: { nativePlanReview: 1; childApprovals: 0 | 1 };
@@ -634,6 +715,13 @@ export type RpcResponse =
 	// Session
 	| { id?: string; type: "response"; command: "get_session_stats"; success: true; data: SessionStats }
 	| { id?: string; type: "response"; command: "get_session_lease"; success: true; data: SessionLeaseReport }
+
+	// Settings and model roles
+	| { id?: string; type: "response"; command: "get_settings"; success: true; data: RpcSettingsState }
+	| { id?: string; type: "response"; command: "set_setting"; success: true; data: RpcSettingEntry }
+	| { id?: string; type: "response"; command: "unset_setting"; success: true; data: RpcSettingEntry }
+	| { id?: string; type: "response"; command: "get_model_roles"; success: true; data: RpcModelRolesState }
+	| { id?: string; type: "response"; command: "set_model_role"; success: true; data: RpcModelRolesState }
 	| { id?: string; type: "response"; command: "export_html"; success: true; data: { path: string } }
 	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }
 	| { id?: string; type: "response"; command: "branch"; success: true; data: { text: string; cancelled: boolean } }

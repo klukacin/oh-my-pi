@@ -2809,6 +2809,261 @@ func (v *CompactionResult) decodeFrom(raw map[string]json.RawMessage) error {
 	return nil
 }
 
+type SettingOption struct {
+	Value       string  `json:"value"`
+	Label       string  `json:"label"`
+	Description *string `json:"description,omitempty"`
+}
+
+func (v *SettingOption) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "SettingOption", v.decodeFrom)
+}
+
+func (v *SettingOption) decodeFrom(raw map[string]json.RawMessage) error {
+	var out SettingOption
+	d := fieldDecoder{raw: raw, owner: "SettingOption"}
+	d.required("value", &out.Value)
+	d.required("label", &out.Label)
+	d.optional("description", &out.Description)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+// A setting as the interactive `/settings` panel defines it, with its stored value.
+type SettingEntry struct {
+	Path string `json:"path"`
+	Tab  string `json:"tab"`
+	// Control the setting edits with.
+	Kind SettingEntryKind `json:"kind"`
+	// Schema type of the stored value.
+	ValueType   string `json:"valueType"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	IsSet       bool   `json:"isSet"`
+	// False while another setting the entry depends on hides it.
+	Visible bool            `json:"visible"`
+	Group   *string         `json:"group,omitempty"`
+	Warning *string         `json:"warning,omitempty"`
+	Options []SettingOption `json:"options,omitempty"`
+	// A credential: `value` is withheld; `isSet` says whether one is stored.
+	Secret *bool `json:"secret,omitempty"`
+	// Order of a `multiselect` value is meaningful.
+	Ordered      *bool           `json:"ordered,omitempty"`
+	Value        json.RawMessage `json:"value,omitempty"`
+	DefaultValue json.RawMessage `json:"defaultValue,omitempty"`
+}
+
+func (v *SettingEntry) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "SettingEntry", v.decodeFrom)
+}
+
+func (v *SettingEntry) decodeFrom(raw map[string]json.RawMessage) error {
+	var out SettingEntry
+	d := fieldDecoder{raw: raw, owner: "SettingEntry"}
+	d.required("path", &out.Path)
+	d.required("tab", &out.Tab)
+	d.required("kind", &out.Kind)
+	d.required("valueType", &out.ValueType)
+	d.required("label", &out.Label)
+	d.required("description", &out.Description)
+	d.required("isSet", &out.IsSet)
+	d.required("visible", &out.Visible)
+	d.optional("group", &out.Group)
+	d.optional("warning", &out.Warning)
+	d.optional("options", &out.Options)
+	d.optional("secret", &out.Secret)
+	d.optional("ordered", &out.Ordered)
+	d.optional("value", &out.Value)
+	d.optional("defaultValue", &out.DefaultValue)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type SettingEntryKind string
+
+const (
+	SettingEntryKindBoolean        SettingEntryKind = "boolean"
+	SettingEntryKindEnum           SettingEntryKind = "enum"
+	SettingEntryKindSubmenu        SettingEntryKind = "submenu"
+	SettingEntryKindText           SettingEntryKind = "text"
+	SettingEntryKindMultiselect    SettingEntryKind = "multiselect"
+	SettingEntryKindProviderLimits SettingEntryKind = "providerLimits"
+)
+
+func (v *SettingEntryKind) UnmarshalJSON(data []byte) error {
+	s, err := decodeString(data, "SettingEntryKind")
+	if err != nil {
+		return err
+	}
+	switch value := SettingEntryKind(s); value {
+	case SettingEntryKindBoolean, SettingEntryKindEnum, SettingEntryKindSubmenu, SettingEntryKindText, SettingEntryKindMultiselect, SettingEntryKindProviderLimits:
+		*v = value
+		return nil
+	}
+	return unknownValue("SettingEntryKind", s)
+}
+
+type SettingsTab struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Section headings in display order.
+	Groups []string `json:"groups"`
+}
+
+func (v *SettingsTab) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "SettingsTab", v.decodeFrom)
+}
+
+func (v *SettingsTab) decodeFrom(raw map[string]json.RawMessage) error {
+	var out SettingsTab
+	d := fieldDecoder{raw: raw, owner: "SettingsTab"}
+	d.required("id", &out.ID)
+	d.required("label", &out.Label)
+	d.required("groups", &out.Groups)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type SettingsState struct {
+	Tabs     []SettingsTab  `json:"tabs"`
+	Settings []SettingEntry `json:"settings"`
+}
+
+func (v *SettingsState) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "SettingsState", v.decodeFrom)
+}
+
+func (v *SettingsState) decodeFrom(raw map[string]json.RawMessage) error {
+	var out SettingsState
+	d := fieldDecoder{raw: raw, owner: "SettingsState"}
+	d.required("tabs", &out.Tabs)
+	d.required("settings", &out.Settings)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type ModelRoleScope string
+
+const (
+	ModelRoleScopeGlobal  ModelRoleScope = "global"
+	ModelRoleScopeProject ModelRoleScope = "project"
+)
+
+func (v *ModelRoleScope) UnmarshalJSON(data []byte) error {
+	s, err := decodeString(data, "ModelRoleScope")
+	if err != nil {
+		return err
+	}
+	switch value := ModelRoleScope(s); value {
+	case ModelRoleScopeGlobal, ModelRoleScopeProject:
+		*v = value
+		return nil
+	}
+	return unknownValue("ModelRoleScope", s)
+}
+
+// One model role and what each settings layer assigns it.
+type ModelRole struct {
+	Role string `json:"role"`
+	Name string `json:"name"`
+	// `kind` roles take an image, search, speech or judge model.
+	Section ModelRoleSection `json:"section"`
+	// Settings layer the effective selector comes from.
+	Provenance string `json:"provenance"`
+	// `provider/id` of every available model the role accepts.
+	Models []string `json:"models"`
+	Tag    *string  `json:"tag,omitempty"`
+	// Selector stored in the global config.
+	Global *string `json:"global,omitempty"`
+	// Selector stored in the current project's config.
+	Project *string `json:"project,omitempty"`
+	// Selector in effect after layering.
+	Effective *string `json:"effective,omitempty"`
+	// `provider/id` the effective selector resolves to.
+	Resolved *string `json:"resolved,omitempty"`
+}
+
+func (v *ModelRole) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "ModelRole", v.decodeFrom)
+}
+
+func (v *ModelRole) decodeFrom(raw map[string]json.RawMessage) error {
+	var out ModelRole
+	d := fieldDecoder{raw: raw, owner: "ModelRole"}
+	d.required("role", &out.Role)
+	d.required("name", &out.Name)
+	d.required("section", &out.Section)
+	d.required("provenance", &out.Provenance)
+	d.required("models", &out.Models)
+	d.optional("tag", &out.Tag)
+	d.optional("global", &out.Global)
+	d.optional("project", &out.Project)
+	d.optional("effective", &out.Effective)
+	d.optional("resolved", &out.Resolved)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type ModelRoleSection string
+
+const (
+	ModelRoleSectionChat ModelRoleSection = "chat"
+	ModelRoleSectionKind ModelRoleSection = "kind"
+)
+
+func (v *ModelRoleSection) UnmarshalJSON(data []byte) error {
+	s, err := decodeString(data, "ModelRoleSection")
+	if err != nil {
+		return err
+	}
+	switch value := ModelRoleSection(s); value {
+	case ModelRoleSectionChat, ModelRoleSectionKind:
+		*v = value
+		return nil
+	}
+	return unknownValue("ModelRoleSection", s)
+}
+
+type ModelRolesState struct {
+	// Whether role edits may target the project layer.
+	Storage ModelRoleScope `json:"storage"`
+	Roles   []ModelRole    `json:"roles"`
+	// `provider/id` the session is running.
+	Active *string `json:"active,omitempty"`
+}
+
+func (v *ModelRolesState) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "ModelRolesState", v.decodeFrom)
+}
+
+func (v *ModelRolesState) decodeFrom(raw map[string]json.RawMessage) error {
+	var out ModelRolesState
+	d := fieldDecoder{raw: raw, owner: "ModelRolesState"}
+	d.required("storage", &out.Storage)
+	d.required("roles", &out.Roles)
+	d.optional("active", &out.Active)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
 type ModelCycleResult struct {
 	Model         ModelInfo      `json:"model"`
 	IsScoped      bool           `json:"isScoped"`
@@ -8720,6 +8975,59 @@ type GetSessionLeaseCommand struct {
 func (c Commands) GetSessionLease(ctx context.Context, p GetSessionLeaseCommand) (GetSessionLeaseResult, error) {
 	var out GetSessionLeaseResult
 	err := c.call(ctx, "get_session_lease", p, 0, &out)
+	return out, err
+}
+
+// GetSettings sends "get_settings": Every setting the interactive panel shows, with its value.
+func (c Commands) GetSettings(ctx context.Context) (SettingsState, error) {
+	var out SettingsState
+	err := c.call(ctx, "get_settings", nil, 0, &out)
+	return out, err
+}
+
+// SetSettingCommand holds the parameters of "set_setting".
+type SetSettingCommand struct {
+	Path  string          `json:"path"`
+	Value json.RawMessage `json:"value"`
+}
+
+// SetSetting sends "set_setting": Write one setting to the global config.
+func (c Commands) SetSetting(ctx context.Context, p SetSettingCommand) (SettingEntry, error) {
+	var out SettingEntry
+	err := c.call(ctx, "set_setting", p, 0, &out)
+	return out, err
+}
+
+// UnsetSettingCommand holds the parameters of "unset_setting".
+type UnsetSettingCommand struct {
+	Path string `json:"path"`
+}
+
+// UnsetSetting sends "unset_setting": Remove one setting from the global config so another layer or its default applies.
+func (c Commands) UnsetSetting(ctx context.Context, p UnsetSettingCommand) (SettingEntry, error) {
+	var out SettingEntry
+	err := c.call(ctx, "unset_setting", p, 0, &out)
+	return out, err
+}
+
+// GetModelRoles sends "get_model_roles": Model role assignments per settings layer.
+func (c Commands) GetModelRoles(ctx context.Context) (ModelRolesState, error) {
+	var out ModelRolesState
+	err := c.call(ctx, "get_model_roles", nil, 0, &out)
+	return out, err
+}
+
+// SetModelRoleCommand holds the parameters of "set_model_role".
+type SetModelRoleCommand struct {
+	Role  string          `json:"role"`
+	Model *string         `json:"model"`
+	Scope *ModelRoleScope `json:"scope,omitempty"`
+}
+
+// SetModelRole sends "set_model_role": Assign a model selector to a role, or clear it with `null`. The default role also switches the running session.
+func (c Commands) SetModelRole(ctx context.Context, p SetModelRoleCommand) (ModelRolesState, error) {
+	var out ModelRolesState
+	err := c.call(ctx, "set_model_role", p, 0, &out)
 	return out, err
 }
 

@@ -62,6 +62,7 @@ import { probeSessionLeases } from "../../session/session-storage";
 import { SKILL_PROMPT_MESSAGE_TYPE, USER_INTERRUPT_LABEL } from "../../session/messages";
 import { executeAcpBuiltinSlashCommand } from "../../slash-commands/acp-builtins";
 import { buildAvailableSlashCommands } from "../../slash-commands/available-commands";
+import { rpcModelRolesState, rpcSetModelRole, rpcSetSetting, rpcSettingsState, rpcUnsetSetting } from "./rpc-settings";
 import { listLogoutAccounts, logoutCredential } from "../../slash-commands/helpers/logout";
 import { cfgSttEnabled } from "../../stt/settings";
 import { defaultLoadModeForToolName } from "../../tools/essential-tools";
@@ -2795,6 +2796,25 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 				const stats = session.getSessionStats();
 				return success(id, "get_session_stats", stats);
 			}
+
+			case "get_settings":
+				return success(id, "get_settings", rpcSettingsState(session));
+
+			case "set_setting":
+				return success(id, "set_setting", rpcSetSetting(session, command.path, command.value));
+
+			case "unset_setting":
+				return success(id, "unset_setting", rpcUnsetSetting(session, command.path));
+
+			case "get_model_roles":
+				return success(id, "get_model_roles", rpcModelRolesState(session));
+
+			case "set_model_role":
+				return success(
+					id,
+					"set_model_role",
+					await rpcSetModelRole(session, command.role, command.model, command.scope),
+				);
 
 			case "get_session_lease": {
 				const { sessionIds } = command;
