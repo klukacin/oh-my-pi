@@ -9,7 +9,12 @@
 import { toError } from "@oh-my-pi/pi-utils";
 import { runExtensionCompact, runExtensionSetModel } from "../extensibility/extensions/compact-handler";
 import { getSessionSlashCommands } from "../extensibility/extensions/get-commands-handler";
-import type { ExtensionError, ExtensionMode, ExtensionUIContext } from "../extensibility/extensions/types";
+import type {
+	ExtensionContext,
+	ExtensionError,
+	ExtensionMode,
+	ExtensionUIContext,
+} from "../extensibility/extensions/types";
 import type { AgentSession } from "../session/agent-session";
 import { USER_INTERRUPT_LABEL } from "../session/messages";
 
@@ -17,6 +22,7 @@ import { USER_INTERRUPT_LABEL } from "../session/messages";
 export type ExtensionSendAction = "extension_send" | "extension_send_user";
 
 export interface InitializeExtensionsOptions {
+	planReview?: Pick<ExtensionContext, "resolvePlanReview" | "getPendingPlanReview" | "openPlanReview">;
 	/** Reports an error thrown by an extension-initiated send. */
 	reportSendError: (action: ExtensionSendAction, error: Error) => void;
 	/** Reports a runtime error surfaced through {@link ExtensionRunner.onError}. */
@@ -149,6 +155,7 @@ export async function initializeExtensions(session: AgentSession, options: Initi
 			getContextUsage: () => session.getContextUsage(),
 			getSystemPrompt: () => session.systemPrompt,
 			runEphemeralTurn: args => session.runEphemeralTurn(args),
+			...options.planReview,
 			compact: instructionsOrOptions => runExtensionCompact(session, instructionsOrOptions),
 		},
 		// ExtensionCommandContextActions — commands invokable via prompt("/command")
@@ -206,7 +213,7 @@ export async function initializeExtensions(session: AgentSession, options: Initi
 			},
 			compact: instructionsOrOptions => runExtensionCompact(session, instructionsOrOptions),
 		},
-		uiContext,
+		uiContext ?? session.subagentUIScope?.ui,
 		mode,
 	);
 

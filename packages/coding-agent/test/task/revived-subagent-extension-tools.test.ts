@@ -13,6 +13,9 @@ import { createMockModel, registerMockApi } from "@oh-my-pi/pi-ai/providers/mock
 import { closeModelCache } from "@oh-my-pi/pi-catalog/model-cache";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
+import { SubagentUIBridge } from "@oh-my-pi/pi-coding-agent/extensibility/subagent-ui";
+import { type PendingExtensionRequest, requestRpcSelect } from "@oh-my-pi/pi-coding-agent/modes/rpc/rpc-mode";
+import type { ExtensionUIContext } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/types";
 import type { ExtensionFactory } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
 import { AgentLifecycleManager } from "@oh-my-pi/pi-coding-agent/registry/agent-lifecycle";
 import { AgentRegistry } from "@oh-my-pi/pi-coding-agent/registry/agent-registry";
@@ -126,7 +129,7 @@ interface RecordedRequest {
 }
 
 /** Runs `AGENT_ID` to a finished keep-alive state with `registersAtFirstTurn` loaded, then parks it. */
-async function spawnAndPark() {
+async function spawnAndPark(ui?: { bridge: SubagentUIBridge; beforePark: (session: AgentSession) => void }) {
 	turnStartReasons.length = 0;
 	const cwd = path.join(root, "home", "work");
 	const artifactsDir = path.join(root, "artifacts");
@@ -173,6 +176,7 @@ async function spawnAndPark() {
 	try {
 		const result = await runSubprocess({
 			cwd,
+			subagentUIBridge: ui?.bridge,
 			artifactsDir,
 			agent: { name: "task", description: "test", systemPrompt: "test", source: "bundled" },
 			task: "report done",
@@ -188,6 +192,9 @@ async function spawnAndPark() {
 			enableIrc: false,
 		});
 		expect(result.exitCode).toBe(0);
+		const live = AgentRegistry.global().get(AGENT_ID)?.session;
+		if (!live) throw new Error("Expected live child before parking");
+		ui?.beforePark(localSession(live));
 		await AgentLifecycleManager.global().park(AGENT_ID);
 	} catch (error) {
 		authStorage.close();
@@ -198,6 +205,7 @@ async function spawnAndPark() {
 		/** The reviver a restarted process builds for the parked agent from its session file. */
 		async coldRevive(): Promise<AgentSession> {
 			const owner = {
+				subagentUIBridge: ui?.bridge,
 				sessionManager: { getCwd: () => cwd, getArtifactManager: () => undefined },
 				effectiveExtensionRoots: { explicit: [], mode: "merge", configured: [], configuredLevel: "user" },
 				preparedExtensions,
@@ -236,11 +244,49 @@ function lateToolOutput(session: AgentSession): string | undefined {
 	return first?.type === "text" ? first.text : undefined;
 }
 
-it("warm-revives with the tools an extension registered at its first turn", async () => {
-	const run = await spawnAndPark();
+function approvalFixture() {
+	const pending = new Map<string, PendingExtensionRequest>();
+	const bridge = new SubagentUIBridge(
+		(_identity, signal) =>
+			({
+				setWidget: () => {},
+				select: (title, choices, options) =>
+					requestRpcSelect(pending, () => {}, title, choices, {
+						...options,
+						signal: options?.signal ? AbortSignal.any([signal, options.signal]) : signal,
+					}),
+			}) satisfies Pick<ExtensionUIContext, "select" | "setWidget"> as unknown as ExtensionUIContext,
+	);
+	let abandoned: Promise<string | undefined> | undefined;
+	let stale: PendingExtensionRequest | undefined;
+	const ask = (session: AgentSession) => session.extensionRunner!.getUIContext().select("Approve?", ["allow", "deny"]);
+	return {
+		bridge,
+		beforePark(session: AgentSession) {
+			abandoned = ask(session);
+			stale = [...pending.values()][0];
+			expect(stale).toBeDefined();
+		},
+		async verifyRevived(session: AgentSession) {
+			expect(await abandoned).toBeUndefined();
+			expect(pending.size).toBe(0);
+			const answer = ask(session);
+			const [id, request] = [...pending.entries()][0]!;
+			stale!.resolve({ type: "extension_ui_response", id: "old", value: "allow" });
+			expect(pending.get(id)).toBe(request);
+			request.resolve({ type: "extension_ui_response", id, value: "deny" });
+			expect(await answer).toBe("deny");
+		},
+	};
+}
+
+it("warm-revives extension tools and child dialogs without accepting pre-park responses", async () => {
+	const ui = approvalFixture();
+	const run = await spawnAndPark(ui);
 	try {
 		expect(run.parked.tools).toContain("late_tool");
 		const revived = localSession(await AgentLifecycleManager.global().ensureLive(AGENT_ID));
+		await ui.verifyRevived(revived);
 		const wake = await run.wake(revived);
 
 		expect(wake.tools).toEqual(run.parked.tools);
@@ -249,6 +295,7 @@ it("warm-revives with the tools an extension registered at its first turn", asyn
 		// The spawn's prompt, then the revive's replay; the wake turn fires none.
 		expect(turnStartReasons).toEqual(["prompt", "revive"]);
 	} finally {
+		ui.bridge.close();
 		run.close();
 	}
 }, 30_000);
@@ -289,17 +336,20 @@ it("hands a second caller the revived session only once its extensions have re-r
 	}
 }, 30_000);
 
-it("cold-revives with the tools an extension registered at its first turn", async () => {
-	const run = await spawnAndPark();
+it("cold-revives extension tools and child dialogs without accepting pre-park responses", async () => {
+	const ui = approvalFixture();
+	const run = await spawnAndPark(ui);
 	let revived: AgentSession | undefined;
 	try {
 		revived = await run.coldRevive();
+		await ui.verifyRevived(revived);
 		const wake = await run.wake(revived);
 
 		expect(wake.tools).toContain("late_tool");
 		expect(lateToolOutput(revived)).toBe("late_tool ok");
 	} finally {
 		await revived?.dispose();
+		ui.bridge.close();
 		run.close();
 	}
 }, 30_000);

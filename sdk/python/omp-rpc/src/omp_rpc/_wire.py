@@ -166,6 +166,11 @@ _NOTIFY_TYPE_VALUES: Final[frozenset[str]] = frozenset({"info", "warning", "erro
 _decode_notify_type = cast("Decoder[NotifyType]", literal(_NOTIFY_TYPE_VALUES))
 
 
+PlanReviewChoice: TypeAlias = Literal["execute", "compact", "keep", "refine", "save"]
+_PLAN_REVIEW_CHOICE_VALUES: Final[frozenset[str]] = frozenset({"execute", "compact", "keep", "refine", "save"})
+_decode_plan_review_choice = cast("Decoder[PlanReviewChoice]", literal(_PLAN_REVIEW_CHOICE_VALUES))
+
+
 PromptStatus: TypeAlias = Literal["completed", "aborted", "error"]
 _PROMPT_STATUS_VALUES: Final[frozenset[str]] = frozenset({"completed", "aborted", "error"})
 _decode_prompt_status = cast("Decoder[PromptStatus]", literal(_PROMPT_STATUS_VALUES))
@@ -643,8 +648,26 @@ class UsageLimitWrapUp:
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
+class PlanModeState:
+    enabled: bool
+    paused: bool
+    plan_file_path: str | None = None
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class RpcCapabilities:
+    native_plan_review: int
+    """Native plan review protocol version; currently 1."""
+    child_approvals: int
+    """Child approval protocol version: 0 disables routing, 1 supports scoped dialogs."""
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
 class SessionState:
     session_id: str
+    capabilities: RpcCapabilities | None = None
+    plan_mode: PlanModeState | None = None
+    pending_plan_review: PlanReviewRequestedEvent | None = None
     model: ModelInfo | None = None
     thinking_level: ThinkingLevel | None = None
     is_streaming: bool = False
@@ -1265,6 +1288,57 @@ class QueueUpdateEvent:
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
+class SessionIdentityChangedEvent:
+    """The active session identity changed after a native operation committed; replace the previous session reference."""
+    type: Literal["session_identity_changed"] = "session_identity_changed"
+    session_id: str
+    session_file: str
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class SubagentUIIdentity:
+    agent_id: str
+    session_id: str
+    parent_agent_id: str | None = None
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class PlanReviewOption:
+    id: PlanReviewChoice
+    label: str
+    disabled: bool
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class PlanReviewTier:
+    role: str
+    provider: str
+    model: str
+    thinking_level: ConfiguredThinkingLevel | None = None
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class PlanReviewRequestedEvent:
+    type: Literal["plan_review_requested"] = "plan_review_requested"
+    review_id: str
+    session_id: str
+    title: str
+    plan_file_path: str
+    plan_content: str
+    options: tuple[PlanReviewOption, ...]
+    tiers: tuple[PlanReviewTier, ...] | None = None
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class PlanReviewResolvedEvent:
+    type: Literal["plan_review_resolved"] = "plan_review_resolved"
+    review_id: str
+    session_id: str
+    by: Literal["local", "extension"]
+    choice: PlanReviewChoice | None = None
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
 class ReadyEvent:
     """First frame after startup; transport fields are absent on servers without protocol v2."""
     type: Literal["ready"] = "ready"
@@ -1505,6 +1579,8 @@ class SelectUiRequest:
     method: Literal["select"] = "select"
     title: str
     options: tuple[str, ...]
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     option_details: tuple[SelectOptionDetail, ...] | None = None
     timeout: int | None = None
 
@@ -1516,6 +1592,8 @@ class ConfirmUiRequest:
     method: Literal["confirm"] = "confirm"
     title: str
     message: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     timeout: int | None = None
 
 
@@ -1525,6 +1603,8 @@ class InputUiRequest:
     id: str
     method: Literal["input"] = "input"
     title: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     placeholder: str | None = None
     timeout: int | None = None
     secret: bool | None = None
@@ -1536,6 +1616,8 @@ class EditorUiRequest:
     id: str
     method: Literal["editor"] = "editor"
     title: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     prefill: str | None = None
     prompt_style: bool | None = None
 
@@ -1547,6 +1629,8 @@ class AskUiRequest:
     id: str
     method: Literal["ask"] = "ask"
     questions: tuple[AskQuestion, ...]
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     timeout: int | None = None
 
 
@@ -1557,6 +1641,8 @@ class CancelUiRequest:
     id: str
     method: Literal["cancel"] = "cancel"
     target_id: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -1565,6 +1651,8 @@ class NotifyUiRequest:
     id: str
     method: Literal["notify"] = "notify"
     message: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     notify_type: NotifyType | None = None
 
 
@@ -1574,6 +1662,8 @@ class SetStatusUiRequest:
     id: str
     method: Literal["setStatus"] = "setStatus"
     status_key: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     status_text: str | None = None
 
 
@@ -1583,6 +1673,8 @@ class SetWidgetUiRequest:
     id: str
     method: Literal["setWidget"] = "setWidget"
     widget_key: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     widget_lines: tuple[str, ...] | None = None
     widget_placement: WidgetPlacement | None = None
 
@@ -1593,6 +1685,8 @@ class SetTitleUiRequest:
     id: str
     method: Literal["setTitle"] = "setTitle"
     title: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -1601,6 +1695,8 @@ class SetEditorTextUiRequest:
     id: str
     method: Literal["set_editor_text"] = "set_editor_text"
     text: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -1609,6 +1705,8 @@ class OpenUrlUiRequest:
     id: str
     method: Literal["open_url"] = "open_url"
     url: str
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     launch_url: str | None = None
     """Short loopback redirect to `url`; the truncation-safe copy target."""
     instructions: str | None = None
@@ -1622,6 +1720,8 @@ class ExtensionUiRequest(ExtensionUiRequestMixin):
     id: str
     title: str | None = None
     options: tuple[str, ...] | None = None
+    subagent: SubagentUIIdentity | None = None
+    root_session_id: str | None = None
     option_details: tuple[SelectOptionDetail, ...] | None = None
     timeout: int | None = None
     message: str | None = None
@@ -1715,7 +1815,7 @@ RpcAgentEvent: TypeAlias = AgentStartEvent | AgentEndEvent | TurnStartEvent | Tu
 """A session event, discriminated by `type`; `set_event_filter` selects which are sent."""
 
 
-RpcNotification: TypeAlias = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent | UnknownNotification
+RpcNotification: TypeAlias = ReadyEvent | PlanReviewRequestedEvent | PlanReviewResolvedEvent | PromptResultEvent | SessionSettledEvent | SessionIdentityChangedEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent | UnknownNotification
 """Unsolicited outbound frame (everything except responses and host tool/URI requests), discriminated by `type`."""
 
 
@@ -2029,10 +2129,30 @@ def parse_usage_limit_wrap_up(value: object, path: str = "UsageLimitWrapUp") -> 
     )
 
 
+def parse_plan_mode_state(value: object, path: str = "PlanModeState") -> PlanModeState:
+    payload = expect_object(value, path)
+    return PlanModeState(
+        enabled=required(payload, "enabled", decode_bool, path),
+        paused=required(payload, "paused", decode_bool, path),
+        plan_file_path=optional(payload, "planFilePath", decode_str, path),
+    )
+
+
+def parse_rpc_capabilities(value: object, path: str = "RpcCapabilities") -> RpcCapabilities:
+    payload = expect_object(value, path)
+    return RpcCapabilities(
+        native_plan_review=required(payload, "nativePlanReview", decode_int, path),
+        child_approvals=required(payload, "childApprovals", decode_int, path),
+    )
+
+
 def parse_session_state(value: object, path: str = "SessionState") -> SessionState:
     payload = expect_object(value, path)
     return SessionState(
         session_id=required(payload, "sessionId", decode_str, path),
+        capabilities=optional(payload, "capabilities", parse_rpc_capabilities, path),
+        plan_mode=optional(payload, "planMode", parse_plan_mode_state, path),
+        pending_plan_review=optional(payload, "pendingPlanReview", parse_plan_review_requested_event, path),
         model=optional(payload, "model", parse_model_info, path),
         thinking_level=optional(payload, "thinkingLevel", _decode_thinking_level, path),
         is_streaming=defaulted(payload, "isStreaming", decode_bool, path, False),
@@ -2717,6 +2837,68 @@ def parse_queue_update_event(value: object, path: str = "QueueUpdateEvent") -> Q
     )
 
 
+def parse_session_identity_changed_event(value: object, path: str = "SessionIdentityChangedEvent") -> SessionIdentityChangedEvent:
+    payload = expect_object(value, path)
+    required(payload, "type", cast('Decoder[Literal["session_identity_changed"]]', literal(frozenset({"session_identity_changed"}))), path)
+    return SessionIdentityChangedEvent(
+        session_id=required(payload, "sessionId", decode_str, path),
+        session_file=required(payload, "sessionFile", decode_str, path),
+    )
+
+
+def parse_subagent_ui_identity(value: object, path: str = "SubagentUIIdentity") -> SubagentUIIdentity:
+    payload = expect_object(value, path)
+    return SubagentUIIdentity(
+        agent_id=required(payload, "agentId", decode_str, path),
+        session_id=required(payload, "sessionId", decode_str, path),
+        parent_agent_id=optional(payload, "parentAgentId", decode_str, path),
+    )
+
+
+def parse_plan_review_option(value: object, path: str = "PlanReviewOption") -> PlanReviewOption:
+    payload = expect_object(value, path)
+    return PlanReviewOption(
+        id=required(payload, "id", _decode_plan_review_choice, path),
+        label=required(payload, "label", decode_str, path),
+        disabled=required(payload, "disabled", decode_bool, path),
+    )
+
+
+def parse_plan_review_tier(value: object, path: str = "PlanReviewTier") -> PlanReviewTier:
+    payload = expect_object(value, path)
+    return PlanReviewTier(
+        role=required(payload, "role", decode_str, path),
+        provider=required(payload, "provider", decode_str, path),
+        model=required(payload, "model", decode_str, path),
+        thinking_level=optional(payload, "thinkingLevel", _decode_configured_thinking_level, path),
+    )
+
+
+def parse_plan_review_requested_event(value: object, path: str = "PlanReviewRequestedEvent") -> PlanReviewRequestedEvent:
+    payload = expect_object(value, path)
+    required(payload, "type", cast('Decoder[Literal["plan_review_requested"]]', literal(frozenset({"plan_review_requested"}))), path)
+    return PlanReviewRequestedEvent(
+        review_id=required(payload, "reviewId", decode_str, path),
+        session_id=required(payload, "sessionId", decode_str, path),
+        title=required(payload, "title", decode_str, path),
+        plan_file_path=required(payload, "planFilePath", decode_str, path),
+        plan_content=required(payload, "planContent", decode_str, path),
+        options=required(payload, "options", array(parse_plan_review_option), path),
+        tiers=optional(payload, "tiers", array(parse_plan_review_tier), path),
+    )
+
+
+def parse_plan_review_resolved_event(value: object, path: str = "PlanReviewResolvedEvent") -> PlanReviewResolvedEvent:
+    payload = expect_object(value, path)
+    required(payload, "type", cast('Decoder[Literal["plan_review_resolved"]]', literal(frozenset({"plan_review_resolved"}))), path)
+    return PlanReviewResolvedEvent(
+        review_id=required(payload, "reviewId", decode_str, path),
+        session_id=required(payload, "sessionId", decode_str, path),
+        by=required(payload, "by", cast('Decoder[Literal["local", "extension"]]', literal(frozenset({"local", "extension"}))), path),
+        choice=optional(payload, "choice", _decode_plan_review_choice, path),
+    )
+
+
 def parse_ready_event(value: object, path: str = "ReadyEvent") -> ReadyEvent:
     payload = expect_object(value, path)
     required(payload, "type", cast('Decoder[Literal["ready"]]', literal(frozenset({"ready"}))), path)
@@ -2985,6 +3167,8 @@ def parse_select_ui_request(value: object, path: str = "SelectUiRequest") -> Sel
         id=required(payload, "id", decode_str, path),
         title=required(payload, "title", decode_str, path),
         options=required(payload, "options", array(decode_str), path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         option_details=optional(payload, "optionDetails", array(parse_select_option_detail), path),
         timeout=optional(payload, "timeout", decode_int, path),
     )
@@ -2998,6 +3182,8 @@ def parse_confirm_ui_request(value: object, path: str = "ConfirmUiRequest") -> C
         id=required(payload, "id", decode_str, path),
         title=required(payload, "title", decode_str, path),
         message=required(payload, "message", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         timeout=optional(payload, "timeout", decode_int, path),
     )
 
@@ -3009,6 +3195,8 @@ def parse_input_ui_request(value: object, path: str = "InputUiRequest") -> Input
     return InputUiRequest(
         id=required(payload, "id", decode_str, path),
         title=required(payload, "title", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         placeholder=optional(payload, "placeholder", decode_str, path),
         timeout=optional(payload, "timeout", decode_int, path),
         secret=optional(payload, "secret", decode_bool, path),
@@ -3022,6 +3210,8 @@ def parse_editor_ui_request(value: object, path: str = "EditorUiRequest") -> Edi
     return EditorUiRequest(
         id=required(payload, "id", decode_str, path),
         title=required(payload, "title", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         prefill=optional(payload, "prefill", decode_str, path),
         prompt_style=optional(payload, "promptStyle", decode_bool, path),
     )
@@ -3034,6 +3224,8 @@ def parse_ask_ui_request(value: object, path: str = "AskUiRequest") -> AskUiRequ
     return AskUiRequest(
         id=required(payload, "id", decode_str, path),
         questions=required(payload, "questions", array(parse_ask_question), path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         timeout=optional(payload, "timeout", decode_int, path),
     )
 
@@ -3045,6 +3237,8 @@ def parse_cancel_ui_request(value: object, path: str = "CancelUiRequest") -> Can
     return CancelUiRequest(
         id=required(payload, "id", decode_str, path),
         target_id=required(payload, "targetId", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
     )
 
 
@@ -3055,6 +3249,8 @@ def parse_notify_ui_request(value: object, path: str = "NotifyUiRequest") -> Not
     return NotifyUiRequest(
         id=required(payload, "id", decode_str, path),
         message=required(payload, "message", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         notify_type=optional(payload, "notifyType", _decode_notify_type, path),
     )
 
@@ -3066,6 +3262,8 @@ def parse_set_status_ui_request(value: object, path: str = "SetStatusUiRequest")
     return SetStatusUiRequest(
         id=required(payload, "id", decode_str, path),
         status_key=required(payload, "statusKey", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         status_text=optional(payload, "statusText", decode_str, path),
     )
 
@@ -3077,6 +3275,8 @@ def parse_set_widget_ui_request(value: object, path: str = "SetWidgetUiRequest")
     return SetWidgetUiRequest(
         id=required(payload, "id", decode_str, path),
         widget_key=required(payload, "widgetKey", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         widget_lines=optional(payload, "widgetLines", array(decode_str), path),
         widget_placement=optional(payload, "widgetPlacement", _decode_widget_placement, path),
     )
@@ -3089,6 +3289,8 @@ def parse_set_title_ui_request(value: object, path: str = "SetTitleUiRequest") -
     return SetTitleUiRequest(
         id=required(payload, "id", decode_str, path),
         title=required(payload, "title", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
     )
 
 
@@ -3099,6 +3301,8 @@ def parse_set_editor_text_ui_request(value: object, path: str = "SetEditorTextUi
     return SetEditorTextUiRequest(
         id=required(payload, "id", decode_str, path),
         text=required(payload, "text", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
     )
 
 
@@ -3109,6 +3313,8 @@ def parse_open_url_ui_request(value: object, path: str = "OpenUrlUiRequest") -> 
     return OpenUrlUiRequest(
         id=required(payload, "id", decode_str, path),
         url=required(payload, "url", decode_str, path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         launch_url=optional(payload, "launchUrl", decode_str, path),
         instructions=optional(payload, "instructions", decode_str, path),
     )
@@ -3122,6 +3328,8 @@ def parse_extension_ui_request(value: object, path: str = "ExtensionUiRequest") 
         id=required(payload, "id", decode_str, path),
         title=optional(payload, "title", decode_str, path),
         options=optional(payload, "options", array(decode_str), path),
+        subagent=optional(payload, "subagent", parse_subagent_ui_identity, path),
+        root_session_id=optional(payload, "rootSessionId", decode_str, path),
         option_details=optional(payload, "optionDetails", array(parse_select_option_detail), path),
         timeout=optional(payload, "timeout", decode_int, path),
         message=optional(payload, "message", decode_str, path),
@@ -3268,8 +3476,11 @@ _RPC_AGENT_EVENT_CASES: Final[dict[str, Decoder[RpcAgentEvent]]] = {
 
 _RPC_NOTIFICATION_CASES: Final[dict[str, Decoder[RpcNotification]]] = {
         "ready": parse_ready_event,
+        "plan_review_requested": parse_plan_review_requested_event,
+        "plan_review_resolved": parse_plan_review_resolved_event,
         "prompt_result": parse_prompt_result_event,
         "session_settled": parse_session_settled_event,
+        "session_identity_changed": parse_session_identity_changed_event,
         "extension_error": parse_extension_error,
         "extension_ui_request": parse_extension_ui_request,
         "available_commands_update": parse_available_commands_update_event,
@@ -3335,6 +3546,34 @@ class WireClient:
 
     def _listen(self, frame_type: str, listener: Callable[..., None]) -> Callable[[], None]:
         raise NotImplementedError
+
+    def set_plan_mode(self, enabled: bool) -> PlanModeState:
+        """Enter or leave native plan mode."""
+        params: dict[str, object] = {}
+        params["enabled"] = enabled
+        return parse_plan_mode_state(self._command("set_plan_mode", params), "set_plan_mode")
+
+    def open_plan_review(self) -> bool:
+        """Open review of the current plan."""
+        params: dict[str, object] = {}
+        return required(expect_object(self._command("open_plan_review", params), "open_plan_review"), "opened", decode_bool, "open_plan_review")
+
+    def get_pending_plan_review(self) -> PlanReviewRequestedEvent | None:
+        """Read the current pending review, including after reconnect."""
+        params: dict[str, object] = {}
+        return required(expect_object(self._command("get_pending_plan_review", params), "get_pending_plan_review"), "review", nullable(parse_plan_review_requested_event), "get_pending_plan_review")
+
+    def resolve_plan_review(self, session_id: str, review_id: str, choice: PlanReviewChoice, *, feedback: str | None = None, role: str | None = None) -> bool:
+        """Resolve a review in its owning session generation."""
+        params: dict[str, object] = {}
+        params["sessionId"] = session_id
+        params["reviewId"] = review_id
+        params["choice"] = choice
+        if feedback is not None:
+            params["feedback"] = feedback
+        if role is not None:
+            params["role"] = role
+        return required(expect_object(self._command("resolve_plan_review", params), "resolve_plan_review"), "accepted", decode_bool, "resolve_plan_review")
 
     def steer(self, message: str, *, images: Sequence[ImageContent] | None = None) -> None:
         """Queue a steering message."""
@@ -3782,6 +4021,14 @@ class WireClient:
         """Subscribe to `ready`: First frame after startup; transport fields are absent on servers without protocol v2."""
         return self._listen("ready", listener)
 
+    def on_plan_review_requested(self, listener: Callable[[PlanReviewRequestedEvent], None]) -> Callable[[], None]:
+        """Subscribe to `plan_review_requested` frames."""
+        return self._listen("plan_review_requested", listener)
+
+    def on_plan_review_resolved(self, listener: Callable[[PlanReviewResolvedEvent], None]) -> Callable[[], None]:
+        """Subscribe to `plan_review_resolved` frames."""
+        return self._listen("plan_review_resolved", listener)
+
     def on_prompt_result(self, listener: Callable[[PromptResultEvent], None]) -> Callable[[], None]:
         """Subscribe to `prompt_result`: Terminal outcome of one accepted `prompt` / `abort_and_prompt`, keyed by request `id`."""
         return self._listen("prompt_result", listener)
@@ -3789,6 +4036,10 @@ class WireClient:
     def on_session_settled(self, listener: Callable[[SessionSettledEvent], None]) -> Callable[[], None]:
         """Subscribe to `session_settled`: The session went quiet: the last run yielded and no background work can wake it."""
         return self._listen("session_settled", listener)
+
+    def on_session_identity_changed(self, listener: Callable[[SessionIdentityChangedEvent], None]) -> Callable[[], None]:
+        """Subscribe to `session_identity_changed`: The active session identity changed after a native operation committed; replace the previous session reference."""
+        return self._listen("session_identity_changed", listener)
 
     def on_extension_error(self, listener: Callable[[ExtensionError], None]) -> Callable[[], None]:
         """Subscribe to `extension_error` frames."""
@@ -4122,6 +4373,12 @@ __all__ = [
     "OpenSessionResult",
     "OpenUrlUiRequest",
     "ParentIrc",
+    "PlanModeState",
+    "PlanReviewChoice",
+    "PlanReviewOption",
+    "PlanReviewRequestedEvent",
+    "PlanReviewResolvedEvent",
+    "PlanReviewTier",
     "PromoteQueuedMessageResult",
     "PromptAck",
     "PromptError",
@@ -4139,12 +4396,14 @@ __all__ = [
     "RetryFallbackAppliedEvent",
     "RetryFallbackSucceededEvent",
     "RpcAgentEvent",
+    "RpcCapabilities",
     "RpcFrameErrorEvent",
     "RpcNotification",
     "SelectOptionDetail",
     "SelectUiRequest",
     "SessionCredits",
     "SessionEntries",
+    "SessionIdentityChangedEvent",
     "SessionInfoUpdateEvent",
     "SessionSettledEvent",
     "SessionState",
@@ -4171,6 +4430,7 @@ __all__ = [
     "SubagentSnapshot",
     "SubagentStatus",
     "SubagentSubscriptionLevel",
+    "SubagentUIIdentity",
     "TextContent",
     "ThinkingConfig",
     "ThinkingContent",
@@ -4306,6 +4566,11 @@ __all__ = [
     "parse_open_session_result",
     "parse_open_url_ui_request",
     "parse_parent_irc",
+    "parse_plan_mode_state",
+    "parse_plan_review_option",
+    "parse_plan_review_requested_event",
+    "parse_plan_review_resolved_event",
+    "parse_plan_review_tier",
     "parse_promote_queued_message_result",
     "parse_prompt_ack",
     "parse_prompt_error",
@@ -4320,11 +4585,13 @@ __all__ = [
     "parse_retry_fallback_applied_event",
     "parse_retry_fallback_succeeded_event",
     "parse_rpc_agent_event",
+    "parse_rpc_capabilities",
     "parse_rpc_frame_error_event",
     "parse_select_option_detail",
     "parse_select_ui_request",
     "parse_session_credits",
     "parse_session_entries",
+    "parse_session_identity_changed_event",
     "parse_session_info_update_event",
     "parse_session_settled_event",
     "parse_session_state",
@@ -4344,6 +4611,7 @@ __all__ = [
     "parse_subagent_progress_event",
     "parse_subagent_progress_payload",
     "parse_subagent_snapshot",
+    "parse_subagent_ui_identity",
     "parse_text_content",
     "parse_thinking_config",
     "parse_thinking_content",

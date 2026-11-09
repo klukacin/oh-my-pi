@@ -827,6 +827,7 @@ function buildExecutorOptions(
 		signal: request.signal,
 		eventBus: session.eventBus,
 		subagentEventBus: session.subagentEventBus,
+		subagentUIBridge: session.getSubagentUIBridge?.(),
 		onProgress: request.onProgress,
 		onToolResult: request.onToolResult,
 		authStorage: session.authStorage,

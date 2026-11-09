@@ -3097,9 +3097,33 @@ impl<'de> Deserialize<'de> for UsageLimitState {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanModeState {
+	pub enabled: bool,
+	pub paused: bool,
+	#[serde(rename = "planFilePath", default, skip_serializing_if = "Option::is_none")]
+	pub plan_file_path: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RpcCapabilities {
+	/// Native plan review protocol version; currently 1.
+	#[serde(rename = "nativePlanReview")]
+	pub native_plan_review: i64,
+	/// Child approval protocol version: 0 disables routing, 1 supports scoped dialogs.
+	#[serde(rename = "childApprovals")]
+	pub child_approvals: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionState {
 	#[serde(rename = "sessionId")]
 	pub session_id: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub capabilities: Option<RpcCapabilities>,
+	#[serde(rename = "planMode", default, skip_serializing_if = "Option::is_none")]
+	pub plan_mode: Option<PlanModeState>,
+	#[serde(rename = "pendingPlanReview", default, skip_serializing_if = "Option::is_none")]
+	pub pending_plan_review: Option<PlanReviewRequestedEvent>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub model: Option<ModelInfo>,
 	#[serde(rename = "thinkingLevel", default, skip_serializing_if = "Option::is_none")]
@@ -4129,6 +4153,96 @@ impl<'de> Deserialize<'de> for RpcAgentEvent {
 	}
 }
 
+/// The active session identity changed after a native operation committed; replace the previous session reference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionIdentityChangedEvent {
+	#[serde(rename = "sessionId")]
+	pub session_id: String,
+	#[serde(rename = "sessionFile")]
+	pub session_file: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubagentUIIdentity {
+	#[serde(rename = "agentId")]
+	pub agent_id: String,
+	#[serde(rename = "sessionId")]
+	pub session_id: String,
+	#[serde(rename = "parentAgentId", default, skip_serializing_if = "Option::is_none")]
+	pub parent_agent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PlanReviewChoice {
+	#[serde(rename = "execute")]
+	Execute,
+	#[serde(rename = "compact")]
+	Compact,
+	#[serde(rename = "keep")]
+	Keep,
+	#[serde(rename = "refine")]
+	Refine,
+	#[serde(rename = "save")]
+	Save,
+}
+
+impl PlanReviewChoice {
+	/// Wire value.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Execute => "execute",
+			Self::Compact => "compact",
+			Self::Keep => "keep",
+			Self::Refine => "refine",
+			Self::Save => "save",
+		}
+	}
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanReviewOption {
+	pub id: PlanReviewChoice,
+	pub label: String,
+	pub disabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanReviewTier {
+	pub role: String,
+	pub provider: String,
+	pub model: String,
+	#[serde(rename = "thinkingLevel", default, skip_serializing_if = "Option::is_none")]
+	pub thinking_level: Option<ConfiguredThinkingLevel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanReviewRequestedEvent {
+	pub r#type: LitPlanReviewRequested,
+	#[serde(rename = "reviewId")]
+	pub review_id: String,
+	#[serde(rename = "sessionId")]
+	pub session_id: String,
+	pub title: String,
+	#[serde(rename = "planFilePath")]
+	pub plan_file_path: String,
+	#[serde(rename = "planContent")]
+	pub plan_content: String,
+	pub options: Vec<PlanReviewOption>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub tiers: Option<Vec<PlanReviewTier>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlanReviewResolvedEvent {
+	#[serde(rename = "reviewId")]
+	pub review_id: String,
+	#[serde(rename = "sessionId")]
+	pub session_id: String,
+	pub by: PlanReviewResolvedEventBy,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub choice: Option<PlanReviewChoice>,
+}
+
 /// First frame after startup; transport fields are absent on servers without protocol v2.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReadyEvent {
@@ -4535,6 +4649,10 @@ pub struct SelectUiRequest {
 	pub id: String,
 	pub title: String,
 	pub options: Vec<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
 	#[serde(rename = "optionDetails", default, skip_serializing_if = "Option::is_none")]
 	pub option_details: Option<Vec<SelectOptionDetail>>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4547,6 +4665,10 @@ pub struct ConfirmUiRequest {
 	pub title: String,
 	pub message: String,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub timeout: Option<i64>,
 }
 
@@ -4554,6 +4676,10 @@ pub struct ConfirmUiRequest {
 pub struct InputUiRequest {
 	pub id: String,
 	pub title: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub placeholder: Option<String>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4567,6 +4693,10 @@ pub struct EditorUiRequest {
 	pub id: String,
 	pub title: String,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub prefill: Option<String>,
 	#[serde(rename = "promptStyle", default, skip_serializing_if = "Option::is_none")]
 	pub prompt_style: Option<bool>,
@@ -4578,6 +4708,10 @@ pub struct AskUiRequest {
 	pub id: String,
 	pub questions: Vec<AskQuestion>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub timeout: Option<i64>,
 }
 
@@ -4587,12 +4721,20 @@ pub struct CancelUiRequest {
 	pub id: String,
 	#[serde(rename = "targetId")]
 	pub target_id: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NotifyUiRequest {
 	pub id: String,
 	pub message: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
 	#[serde(rename = "notifyType", default, skip_serializing_if = "Option::is_none")]
 	pub notify_type: Option<NotifyType>,
 }
@@ -4602,6 +4744,10 @@ pub struct SetStatusUiRequest {
 	pub id: String,
 	#[serde(rename = "statusKey")]
 	pub status_key: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
 	#[serde(rename = "statusText", default, skip_serializing_if = "Option::is_none")]
 	pub status_text: Option<String>,
 }
@@ -4611,6 +4757,10 @@ pub struct SetWidgetUiRequest {
 	pub id: String,
 	#[serde(rename = "widgetKey")]
 	pub widget_key: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
 	#[serde(rename = "widgetLines", default, skip_serializing_if = "Option::is_none")]
 	pub widget_lines: Option<Vec<String>>,
 	#[serde(rename = "widgetPlacement", default, skip_serializing_if = "Option::is_none")]
@@ -4621,18 +4771,30 @@ pub struct SetWidgetUiRequest {
 pub struct SetTitleUiRequest {
 	pub id: String,
 	pub title: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetEditorTextUiRequest {
 	pub id: String,
 	pub text: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OpenUrlUiRequest {
 	pub id: String,
 	pub url: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub subagent: Option<SubagentUIIdentity>,
+	#[serde(rename = "rootSessionId", default, skip_serializing_if = "Option::is_none")]
+	pub root_session_id: Option<String>,
 	/// Short loopback redirect to `url`; the truncation-safe copy target.
 	#[serde(rename = "launchUrl", default, skip_serializing_if = "Option::is_none")]
 	pub launch_url: Option<String>,
@@ -5055,10 +5217,14 @@ pub struct HostUriSchemeDefinition {
 pub enum RpcNotification {
 	/// First frame after startup; transport fields are absent on servers without protocol v2.
 	Ready(ReadyEvent),
+	PlanReviewRequested(PlanReviewRequestedEvent),
+	PlanReviewResolved(PlanReviewResolvedEvent),
 	/// Terminal outcome of one accepted `prompt` / `abort_and_prompt`, keyed by request `id`.
 	PromptResult(PromptResultEvent),
 	/// The session went quiet: the last run yielded and no background work can wake it.
 	SessionSettled(SessionSettledEvent),
+	/// The active session identity changed after a native operation committed; replace the previous session reference.
+	SessionIdentityChanged(SessionIdentityChangedEvent),
 	ExtensionError(ExtensionError),
 	/// Extension UI request, discriminated by `method`.
 	ExtensionUiRequest(ExtensionUiRequest),
@@ -5106,8 +5272,11 @@ impl RpcNotification {
 	pub fn from_value(value: Value) -> Result<Self, serde_json::Error> {
 		let decode: fn(Value) -> Result<Self, serde_json::Error> = match value.get("type").and_then(Value::as_str) {
 			Some("ready") => |value| serde_json::from_value(value).map(Self::Ready),
+			Some("plan_review_requested") => |value| serde_json::from_value(value).map(Self::PlanReviewRequested),
+			Some("plan_review_resolved") => |value| serde_json::from_value(value).map(Self::PlanReviewResolved),
 			Some("prompt_result") => |value| serde_json::from_value(value).map(Self::PromptResult),
 			Some("session_settled") => |value| serde_json::from_value(value).map(Self::SessionSettled),
+			Some("session_identity_changed") => |value| serde_json::from_value(value).map(Self::SessionIdentityChanged),
 			Some("extension_error") => |value| serde_json::from_value(value).map(Self::ExtensionError),
 			Some("extension_ui_request") => |value| serde_json::from_value(value).map(Self::ExtensionUiRequest),
 			Some("available_commands_update") => |value| serde_json::from_value(value).map(Self::AvailableCommandsUpdate),
@@ -5138,8 +5307,11 @@ impl Serialize for RpcNotification {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		match self {
 			Self::Ready(member) => serialize_tagged(member, &[("type", "ready")], serializer),
+			Self::PlanReviewRequested(member) => serialize_tagged(member, &[("type", "plan_review_requested")], serializer),
+			Self::PlanReviewResolved(member) => serialize_tagged(member, &[("type", "plan_review_resolved")], serializer),
 			Self::PromptResult(member) => serialize_tagged(member, &[("type", "prompt_result")], serializer),
 			Self::SessionSettled(member) => serialize_tagged(member, &[("type", "session_settled")], serializer),
+			Self::SessionIdentityChanged(member) => serialize_tagged(member, &[("type", "session_identity_changed")], serializer),
 			Self::ExtensionError(member) => serialize_tagged(member, &[("type", "extension_error")], serializer),
 			Self::ExtensionUiRequest(member) => member.serialize(serializer),
 			Self::AvailableCommandsUpdate(member) => serialize_tagged(member, &[("type", "available_commands_update")], serializer),
@@ -5190,7 +5362,7 @@ impl RpcServerFrame {
 		let decode: fn(Value) -> Result<Self, serde_json::Error> = match value.get("type").and_then(Value::as_str) {
 			Some("response") => |value| serde_json::from_value(value).map(Self::Response),
 			Some("host_tool_call" | "host_tool_cancel" | "host_uri_request" | "host_uri_cancel") => |value| serde_json::from_value(value).map(Self::RpcHostRequest),
-			Some("ready" | "prompt_result" | "session_settled" | "extension_error" | "extension_ui_request" | "available_commands_update" | "subagent_lifecycle" | "subagent_progress" | "subagent_event" | "live_phase" | "live_levels" | "live_transcript" | "live_end" | "dictation_state" | "dictation_transcript" | "dictation_end" | "btw_delta" | "btw_record" | "command_output" | "session_info_update" | "config_update" | "rpc_frame_error" | "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "manual_compaction_start" | "manual_compaction_end" | "auto_retry_start" | "auto_retry_end" | "cache_warming_start" | "cache_warming_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcNotification),
+			Some("ready" | "plan_review_requested" | "plan_review_resolved" | "prompt_result" | "session_settled" | "session_identity_changed" | "extension_error" | "extension_ui_request" | "available_commands_update" | "subagent_lifecycle" | "subagent_progress" | "subagent_event" | "live_phase" | "live_levels" | "live_transcript" | "live_end" | "dictation_state" | "dictation_transcript" | "dictation_end" | "btw_delta" | "btw_record" | "command_output" | "session_info_update" | "config_update" | "rpc_frame_error" | "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_update" | "message_end" | "tool_execution_start" | "tool_execution_update" | "tool_stream_update" | "tool_execution_end" | "auto_compaction_start" | "auto_compaction_end" | "manual_compaction_start" | "manual_compaction_end" | "auto_retry_start" | "auto_retry_end" | "cache_warming_start" | "cache_warming_end" | "retry_fallback_applied" | "retry_fallback_succeeded" | "model_changed" | "config_warnings_changed" | "advisor_cost_changed" | "advisor_yielded" | "ttsr_triggered" | "todo_reminder" | "todo_auto_clear" | "irc_message" | "notice" | "thinking_level_changed" | "goal_updated" | "queue_update") => |value| serde_json::from_value(value).map(Self::RpcNotification),
 			_ => |value| Ok(Self::Unknown(value)),
 		};
 		decode(value)
@@ -5212,6 +5384,40 @@ impl<'de> Deserialize<'de> for RpcServerFrame {
 	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
 		Self::from_value(Value::deserialize(deserializer)?).map_err(D::Error::custom)
 	}
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetPlanModeParams {
+	pub enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenPlanReviewResult {
+	pub opened: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GetPendingPlanReviewResult {
+	#[serde(deserialize_with = "Deserialize::deserialize")]
+	pub review: Option<PlanReviewRequestedEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResolvePlanReviewParams {
+	#[serde(rename = "sessionId")]
+	pub session_id: String,
+	#[serde(rename = "reviewId")]
+	pub review_id: String,
+	pub choice: PlanReviewChoice,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub feedback: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub role: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResolvePlanReviewResult {
+	pub accepted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -5978,6 +6184,45 @@ impl LogoutAccountType {
 	}
 }
 
+/// The constant `"plan_review_requested"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct LitPlanReviewRequested;
+
+impl Serialize for LitPlanReviewRequested {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		serializer.serialize_str("plan_review_requested")
+	}
+}
+
+impl<'de> Deserialize<'de> for LitPlanReviewRequested {
+	fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+		let value = Value::deserialize(deserializer)?;
+		if value.as_str() == Some("plan_review_requested") {
+			Ok(Self)
+		} else {
+			Err(D::Error::custom(format!("expected \"plan_review_requested\", got {value}")))
+		}
+	}
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PlanReviewResolvedEventBy {
+	#[serde(rename = "local")]
+	Local,
+	#[serde(rename = "extension")]
+	Extension,
+}
+
+impl PlanReviewResolvedEventBy {
+	/// Wire value.
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Local => "local",
+			Self::Extension => "extension",
+		}
+	}
+}
+
 /// The constant `"cost_cap"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct LitCostCap;
@@ -6160,6 +6405,74 @@ fn default_queue_update_event_live_steered() -> i64 {
 
 fn default_ask_question_multi() -> bool {
 	serde_json::from_str("false").expect("valid wire default")
+}
+
+/// Enter or leave native plan mode.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetPlanModeCommand {
+	pub enabled: bool,
+}
+
+impl Command for SetPlanModeCommand {
+	const NAME: &'static str = "set_plan_mode";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = PlanModeState;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<PlanModeState>(data.unwrap_or_else(|| Value::Object(Map::new())))
+	}
+}
+
+/// Open review of the current plan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct OpenPlanReviewCommand {}
+
+impl Command for OpenPlanReviewCommand {
+	const NAME: &'static str = "open_plan_review";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = bool;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<OpenPlanReviewResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.opened)
+	}
+}
+
+/// Read the current pending review, including after reconnect.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct GetPendingPlanReviewCommand {}
+
+impl Command for GetPendingPlanReviewCommand {
+	const NAME: &'static str = "get_pending_plan_review";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = Option<PlanReviewRequestedEvent>;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<GetPendingPlanReviewResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.review)
+	}
+}
+
+/// Resolve a review in its owning session generation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResolvePlanReviewCommand {
+	#[serde(rename = "sessionId")]
+	pub session_id: String,
+	#[serde(rename = "reviewId")]
+	pub review_id: String,
+	pub choice: PlanReviewChoice,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub feedback: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub role: Option<String>,
+}
+
+impl Command for ResolvePlanReviewCommand {
+	const NAME: &'static str = "resolve_plan_review";
+	const TIMEOUT_MS: Option<u64> = None;
+	type Output = bool;
+
+	fn decode(data: Option<Value>) -> Result<Self::Output, serde_json::Error> {
+		serde_json::from_value::<ResolvePlanReviewResult>(data.unwrap_or_else(|| Value::Object(Map::new()))).map(|result| result.accepted)
+	}
 }
 
 /// Switch the connection to a protocol version advertised by `ready`.

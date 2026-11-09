@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- RPC clients can enter native plan mode, reopen pending reviews, and approve, refine, or save plans with model-tier selection.
+
 ## [18.18.3] - 2026-11-09
 
 ### Breaking Changes

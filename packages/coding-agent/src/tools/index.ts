@@ -1,3 +1,4 @@
+import type { SubagentUIBridge } from "../extensibility/subagent-ui";
 import type { AgentOptions, AgentTelemetryConfig, AgentTool, AgentToolContext } from "@oh-my-pi/pi-agent-core";
 import type { EditStore } from "@oh-my-pi/pi-natives";
 import type { FetchImpl, ImageContent, Message, Model, ServiceTierByFamily, ToolChoice } from "@oh-my-pi/pi-ai";
@@ -325,6 +326,7 @@ export interface ToolSession {
 	 * root session's traffic.
 	 */
 	subagentEventBus?: EventBus;
+	getSubagentUIBridge?: () => SubagentUIBridge | undefined;
 	/** Output schema for structured completion (subagents). */
 	outputSchema?: unknown;
 	/** Enforcement policy for {@link outputSchema}; defaults to legacy permissive behavior. */

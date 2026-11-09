@@ -17,7 +17,7 @@
  */
 import type { SingleResult } from "@oh-my-pi/pi-tui/tools/task";
 import { type AgentRef, AgentRegistry } from "../registry/agent-registry";
-import type { AgentSessionHandle } from "../session/agent-session-handle";
+import { isLocalAgentSession, type AgentSessionHandle } from "../session/agent-session-handle";
 import {
 	type ExecutorOptions,
 	type FollowUpTurnOptions,
@@ -129,6 +129,8 @@ export async function runSubprocessPlaced(
 	options: ExecutorOptions,
 	runHere: (options: ExecutorOptions) => Promise<SingleResult>,
 ): Promise<SingleResult> {
+	// UI callbacks belong to the owning process and cannot cross the worker boundary.
+	if (options.subagentUIBridge) return runHere(options);
 	const placed = pool.place();
 	let request: SubagentRunRequest | undefined;
 	try {
@@ -208,6 +210,7 @@ export async function revivePersistedPlaced(
 	expected: AgentRef,
 	reviveHere: (spec: PersistedReviveSpec, expected: AgentRef) => Promise<AgentSessionHandle>,
 ): Promise<AgentSessionHandle> {
+	if (isLocalAgentSession(spec.root) && spec.root.subagentUIBridge) return reviveHere(spec, expected);
 	const placement = await pool.acquire();
 	try {
 		if (!placement.worker) return await reviveHere(spec, expected);

@@ -1,3 +1,4 @@
+import type { SubagentUIBridge, SubagentUIScope } from "../extensibility/subagent-ui";
 /**
  * AgentSession - Core abstraction for agent lifecycle and session management.
  *
@@ -3335,6 +3336,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		return this.#asyncJobManager;
 	}
 
+	subagentUIBridge?: SubagentUIBridge;
+	subagentUIScope?: SubagentUIScope;
+
 	getAgentId(): string | undefined {
 		return this.#agentId;
 	}
@@ -6645,6 +6649,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 	 */
 	#disposeCall?: Promise<void>;
 	dispose(options: AgentSessionDisposeOptions = {}): Promise<void> {
+		this.subagentUIScope?.close();
 		if (!this.#disposeCall) this.#disposeCall = this.#doDispose(options);
 		return this.#disposeCall;
 	}
@@ -11945,6 +11950,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		/** Internal `/compact` startup keeps the manual-compaction marker alive while aborting the active turn. */
 		preserveCompaction?: boolean;
 	}): Promise<void> {
+		this.subagentUIScope?.cancel();
 		const userInterrupt = options?.reason === USER_INTERRUPT_LABEL;
 		this.#pendingAbortErrorId = userInterrupt ? AIError.create(AIError.Flag.UserInterrupt) : undefined;
 		// Latch only when the interrupt stops something; an idle Esc would otherwise fold

@@ -490,8 +490,24 @@ export interface UsageLimitWrapUp {
 /** Provider-neutral state of an account past its usage limit, discriminated by `stage`. */
 export type UsageLimitState = UsageLimitLowPriority | UsageLimitWrapUp;
 
+export interface PlanModeState {
+	enabled: boolean;
+	paused: boolean;
+	planFilePath?: string;
+}
+
+export interface RpcCapabilities {
+	/** Native plan review protocol version; currently 1. */
+	nativePlanReview: number;
+	/** Child approval protocol version: 0 disables routing, 1 supports scoped dialogs. */
+	childApprovals: number;
+}
+
 export interface SessionState {
 	sessionId: string;
+	capabilities?: RpcCapabilities;
+	planMode?: PlanModeState;
+	pendingPlanReview?: PlanReviewRequestedEvent;
 	model?: ModelInfo;
 	thinkingLevel?: ThinkingLevel;
 	isStreaming?: boolean;
@@ -1062,6 +1078,53 @@ export interface QueueUpdateEvent {
 /** A session event, discriminated by `type`; `set_event_filter` selects which are sent. */
 export type RpcAgentEvent = AgentStartEvent | AgentEndEvent | TurnStartEvent | TurnEndEvent | MessageStartEvent | MessageUpdateEvent | MessageEndEvent | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolStreamUpdateEvent | ToolExecutionEndEvent | AutoCompactionStartEvent | AutoCompactionEndEvent | ManualCompactionStartEvent | ManualCompactionEndEvent | AutoRetryStartEvent | AutoRetryEndEvent | CacheWarmingStartEvent | CacheWarmingEndEvent | RetryFallbackAppliedEvent | RetryFallbackSucceededEvent | ModelChangedEvent | ConfigWarningsChangedEvent | AdvisorCostChangedEvent | AdvisorYieldedEvent | TtsrTriggeredEvent | TodoReminderEvent | TodoAutoClearEvent | IrcMessageEvent | NoticeEvent | ThinkingLevelChangedEvent | GoalUpdatedEvent | QueueUpdateEvent;
 
+/** The active session identity changed after a native operation committed; replace the previous session reference. */
+export interface SessionIdentityChangedEvent {
+	type: "session_identity_changed";
+	sessionId: string;
+	sessionFile: string;
+}
+
+export interface SubagentUIIdentity {
+	agentId: string;
+	sessionId: string;
+	parentAgentId?: string;
+}
+
+export type PlanReviewChoice = "execute" | "compact" | "keep" | "refine" | "save";
+
+export interface PlanReviewOption {
+	id: PlanReviewChoice;
+	label: string;
+	disabled: boolean;
+}
+
+export interface PlanReviewTier {
+	role: string;
+	provider: string;
+	model: string;
+	thinkingLevel?: ConfiguredThinkingLevel;
+}
+
+export interface PlanReviewRequestedEvent {
+	type: "plan_review_requested";
+	reviewId: string;
+	sessionId: string;
+	title: string;
+	planFilePath: string;
+	planContent: string;
+	options: PlanReviewOption[];
+	tiers?: PlanReviewTier[];
+}
+
+export interface PlanReviewResolvedEvent {
+	type: "plan_review_resolved";
+	reviewId: string;
+	sessionId: string;
+	by: "local" | "extension";
+	choice?: PlanReviewChoice;
+}
+
 /** First frame after startup; transport fields are absent on servers without protocol v2. */
 export interface ReadyEvent {
 	type: "ready";
@@ -1290,6 +1353,8 @@ export interface SelectUiRequest {
 	method: "select";
 	title: string;
 	options: string[];
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 	optionDetails?: SelectOptionDetail[];
 	timeout?: number;
 }
@@ -1300,6 +1365,8 @@ export interface ConfirmUiRequest {
 	method: "confirm";
 	title: string;
 	message: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 	timeout?: number;
 }
 
@@ -1308,6 +1375,8 @@ export interface InputUiRequest {
 	id: string;
 	method: "input";
 	title: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 	placeholder?: string;
 	timeout?: number;
 	secret?: boolean;
@@ -1318,6 +1387,8 @@ export interface EditorUiRequest {
 	id: string;
 	method: "editor";
 	title: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 	prefill?: string;
 	promptStyle?: boolean;
 }
@@ -1328,6 +1399,8 @@ export interface AskUiRequest {
 	id: string;
 	method: "ask";
 	questions: AskQuestion[];
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 	timeout?: number;
 }
 
@@ -1337,6 +1410,8 @@ export interface CancelUiRequest {
 	id: string;
 	method: "cancel";
 	targetId: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 }
 
 export interface NotifyUiRequest {
@@ -1344,6 +1419,8 @@ export interface NotifyUiRequest {
 	id: string;
 	method: "notify";
 	message: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 	notifyType?: NotifyType;
 }
 
@@ -1352,6 +1429,8 @@ export interface SetStatusUiRequest {
 	id: string;
 	method: "setStatus";
 	statusKey: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 	statusText?: string;
 }
 
@@ -1360,6 +1439,8 @@ export interface SetWidgetUiRequest {
 	id: string;
 	method: "setWidget";
 	widgetKey: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 	widgetLines?: string[];
 	widgetPlacement?: WidgetPlacement;
 }
@@ -1369,6 +1450,8 @@ export interface SetTitleUiRequest {
 	id: string;
 	method: "setTitle";
 	title: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 }
 
 export interface SetEditorTextUiRequest {
@@ -1376,6 +1459,8 @@ export interface SetEditorTextUiRequest {
 	id: string;
 	method: "set_editor_text";
 	text: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 }
 
 export interface OpenUrlUiRequest {
@@ -1383,6 +1468,8 @@ export interface OpenUrlUiRequest {
 	id: string;
 	method: "open_url";
 	url: string;
+	subagent?: SubagentUIIdentity;
+	rootSessionId?: string;
 	/** Short loopback redirect to `url`; the truncation-safe copy target. */
 	launchUrl?: string;
 	instructions?: string;
@@ -1539,10 +1626,34 @@ export interface HostUriSchemeDefinition {
 }
 
 /** Unsolicited outbound frame (everything except responses and host tool/URI requests), discriminated by `type`. */
-export type RpcNotification = ReadyEvent | PromptResultEvent | SessionSettledEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent;
+export type RpcNotification = ReadyEvent | PlanReviewRequestedEvent | PlanReviewResolvedEvent | PromptResultEvent | SessionSettledEvent | SessionIdentityChangedEvent | ExtensionError | ExtensionUiRequest | AvailableCommandsUpdateEvent | SubagentLifecycleEvent | SubagentProgressEvent | SubagentEvent | LivePhaseEvent | LiveLevelsEvent | LiveTranscriptEvent | LiveEndEvent | DictationStateEvent | DictationTranscriptEvent | DictationEndEvent | BtwDeltaEvent | BtwRecordEvent | CommandOutputEvent | SessionInfoUpdateEvent | ConfigUpdateEvent | RpcFrameErrorEvent | RpcAgentEvent;
 
 /** Any frame the server writes to stdout (after reassembling `rpc_chunk` sequences), discriminated by `type`. */
 export type RpcServerFrame = RpcResponse | RpcHostRequest | RpcNotification;
+
+export interface SetPlanModeParams {
+	enabled: boolean;
+}
+
+export interface OpenPlanReviewResult {
+	opened: boolean;
+}
+
+export interface GetPendingPlanReviewResult {
+	review: PlanReviewRequestedEvent | null;
+}
+
+export interface ResolvePlanReviewParams {
+	sessionId: string;
+	reviewId: string;
+	choice: PlanReviewChoice;
+	feedback?: string;
+	role?: string;
+}
+
+export interface ResolvePlanReviewResult {
+	accepted: boolean;
+}
 
 export interface NegotiateProtocolParams {
 	protocolVersion: number;
@@ -1922,6 +2033,10 @@ export interface GetBtwHistoryResult {
 
 /** Every RPC command's parameters and successful response `data`. */
 export interface RpcWireCommands {
+	set_plan_mode: { params: SetPlanModeParams; result: PlanModeState };
+	open_plan_review: { params: undefined; result: OpenPlanReviewResult };
+	get_pending_plan_review: { params: undefined; result: GetPendingPlanReviewResult };
+	resolve_plan_review: { params: ResolvePlanReviewParams; result: ResolvePlanReviewResult };
 	negotiate_protocol: { params: NegotiateProtocolParams; result: NegotiateProtocolResult };
 	prompt: { params: PromptParams; result: PromptAck };
 	steer: { params: SteerParams; result: undefined };

@@ -2534,20 +2534,69 @@ func (v *UsageLimitState) decodeFrom(raw map[string]json.RawMessage) error {
 	return nil
 }
 
+type PlanModeState struct {
+	Enabled      bool    `json:"enabled"`
+	Paused       bool    `json:"paused"`
+	PlanFilePath *string `json:"planFilePath,omitempty"`
+}
+
+func (v *PlanModeState) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "PlanModeState", v.decodeFrom)
+}
+
+func (v *PlanModeState) decodeFrom(raw map[string]json.RawMessage) error {
+	var out PlanModeState
+	d := fieldDecoder{raw: raw, owner: "PlanModeState"}
+	d.required("enabled", &out.Enabled)
+	d.required("paused", &out.Paused)
+	d.optional("planFilePath", &out.PlanFilePath)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type RpcCapabilities struct {
+	// Native plan review protocol version; currently 1.
+	NativePlanReview int64 `json:"nativePlanReview"`
+	// Child approval protocol version: 0 disables routing, 1 supports scoped dialogs.
+	ChildApprovals int64 `json:"childApprovals"`
+}
+
+func (v *RpcCapabilities) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "RpcCapabilities", v.decodeFrom)
+}
+
+func (v *RpcCapabilities) decodeFrom(raw map[string]json.RawMessage) error {
+	var out RpcCapabilities
+	d := fieldDecoder{raw: raw, owner: "RpcCapabilities"}
+	d.required("nativePlanReview", &out.NativePlanReview)
+	d.required("childApprovals", &out.ChildApprovals)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
 type SessionState struct {
-	SessionID             string         `json:"sessionId"`
-	Model                 *ModelInfo     `json:"model,omitempty"`
-	ThinkingLevel         *ThinkingLevel `json:"thinkingLevel,omitempty"`
-	IsStreaming           bool           `json:"isStreaming"`
-	IsCompacting          bool           `json:"isCompacting"`
-	SteeringMode          QueueMode      `json:"steeringMode"`
-	FollowUpMode          QueueMode      `json:"followUpMode"`
-	InterruptMode         InterruptMode  `json:"interruptMode"`
-	SessionFile           *string        `json:"sessionFile,omitempty"`
-	SessionName           *string        `json:"sessionName,omitempty"`
-	AutoCompactionEnabled bool           `json:"autoCompactionEnabled"`
-	FastModeEnabled       bool           `json:"fastModeEnabled"`
-	FastModeActive        bool           `json:"fastModeActive"`
+	SessionID             string                    `json:"sessionId"`
+	Capabilities          *RpcCapabilities          `json:"capabilities,omitempty"`
+	PlanMode              *PlanModeState            `json:"planMode,omitempty"`
+	PendingPlanReview     *PlanReviewRequestedEvent `json:"pendingPlanReview,omitempty"`
+	Model                 *ModelInfo                `json:"model,omitempty"`
+	ThinkingLevel         *ThinkingLevel            `json:"thinkingLevel,omitempty"`
+	IsStreaming           bool                      `json:"isStreaming"`
+	IsCompacting          bool                      `json:"isCompacting"`
+	SteeringMode          QueueMode                 `json:"steeringMode"`
+	FollowUpMode          QueueMode                 `json:"followUpMode"`
+	InterruptMode         InterruptMode             `json:"interruptMode"`
+	SessionFile           *string                   `json:"sessionFile,omitempty"`
+	SessionName           *string                   `json:"sessionName,omitempty"`
+	AutoCompactionEnabled bool                      `json:"autoCompactionEnabled"`
+	FastModeEnabled       bool                      `json:"fastModeEnabled"`
+	FastModeActive        bool                      `json:"fastModeActive"`
 	// `/slow` applies to the active model.
 	SlowModeSupported bool `json:"slowModeSupported"`
 	// `/slow` is on for the active model; always `false` when `slowModeSupported` is `false`.
@@ -2581,6 +2630,9 @@ func (v *SessionState) decodeFrom(raw map[string]json.RawMessage) error {
 	var out SessionState
 	d := fieldDecoder{raw: raw, owner: "SessionState"}
 	d.required("sessionId", &out.SessionID)
+	d.optional("capabilities", &out.Capabilities)
+	d.optional("planMode", &out.PlanMode)
+	d.optional("pendingPlanReview", &out.PendingPlanReview)
 	d.optional("model", &out.Model)
 	d.optional("thinkingLevel", &out.ThinkingLevel)
 	d.defaulted("isStreaming", &out.IsStreaming, `false`)
@@ -4727,6 +4779,216 @@ func (v *RpcAgentEvent) decodeFrom(raw map[string]json.RawMessage) error {
 	return nil
 }
 
+// The active session identity changed after a native operation committed; replace the previous session reference.
+type SessionIdentityChangedEvent struct {
+	SessionID   string `json:"sessionId"`
+	SessionFile string `json:"sessionFile"`
+}
+
+func (v *SessionIdentityChangedEvent) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "SessionIdentityChangedEvent", v.decodeFrom)
+}
+
+func (v *SessionIdentityChangedEvent) decodeFrom(raw map[string]json.RawMessage) error {
+	var out SessionIdentityChangedEvent
+	d := fieldDecoder{raw: raw, owner: "SessionIdentityChangedEvent"}
+	d.constant("type", "session_identity_changed")
+	d.required("sessionId", &out.SessionID)
+	d.required("sessionFile", &out.SessionFile)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v SessionIdentityChangedEvent) MarshalJSON() ([]byte, error) {
+	type plain SessionIdentityChangedEvent
+	return encodeObject(plain(v), `"type":"session_identity_changed"`, nil)
+}
+
+type SubagentUIIdentity struct {
+	AgentID       string  `json:"agentId"`
+	SessionID     string  `json:"sessionId"`
+	ParentAgentID *string `json:"parentAgentId,omitempty"`
+}
+
+func (v *SubagentUIIdentity) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "SubagentUIIdentity", v.decodeFrom)
+}
+
+func (v *SubagentUIIdentity) decodeFrom(raw map[string]json.RawMessage) error {
+	var out SubagentUIIdentity
+	d := fieldDecoder{raw: raw, owner: "SubagentUIIdentity"}
+	d.required("agentId", &out.AgentID)
+	d.required("sessionId", &out.SessionID)
+	d.optional("parentAgentId", &out.ParentAgentID)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type PlanReviewChoice string
+
+const (
+	PlanReviewChoiceExecute PlanReviewChoice = "execute"
+	PlanReviewChoiceCompact PlanReviewChoice = "compact"
+	PlanReviewChoiceKeep    PlanReviewChoice = "keep"
+	PlanReviewChoiceRefine  PlanReviewChoice = "refine"
+	PlanReviewChoiceSave    PlanReviewChoice = "save"
+)
+
+func (v *PlanReviewChoice) UnmarshalJSON(data []byte) error {
+	s, err := decodeString(data, "PlanReviewChoice")
+	if err != nil {
+		return err
+	}
+	switch value := PlanReviewChoice(s); value {
+	case PlanReviewChoiceExecute, PlanReviewChoiceCompact, PlanReviewChoiceKeep, PlanReviewChoiceRefine, PlanReviewChoiceSave:
+		*v = value
+		return nil
+	}
+	return unknownValue("PlanReviewChoice", s)
+}
+
+type PlanReviewOption struct {
+	ID       PlanReviewChoice `json:"id"`
+	Label    string           `json:"label"`
+	Disabled bool             `json:"disabled"`
+}
+
+func (v *PlanReviewOption) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "PlanReviewOption", v.decodeFrom)
+}
+
+func (v *PlanReviewOption) decodeFrom(raw map[string]json.RawMessage) error {
+	var out PlanReviewOption
+	d := fieldDecoder{raw: raw, owner: "PlanReviewOption"}
+	d.required("id", &out.ID)
+	d.required("label", &out.Label)
+	d.required("disabled", &out.Disabled)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type PlanReviewTier struct {
+	Role          string                   `json:"role"`
+	Provider      string                   `json:"provider"`
+	Model         string                   `json:"model"`
+	ThinkingLevel *ConfiguredThinkingLevel `json:"thinkingLevel,omitempty"`
+}
+
+func (v *PlanReviewTier) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "PlanReviewTier", v.decodeFrom)
+}
+
+func (v *PlanReviewTier) decodeFrom(raw map[string]json.RawMessage) error {
+	var out PlanReviewTier
+	d := fieldDecoder{raw: raw, owner: "PlanReviewTier"}
+	d.required("role", &out.Role)
+	d.required("provider", &out.Provider)
+	d.required("model", &out.Model)
+	d.optional("thinkingLevel", &out.ThinkingLevel)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type PlanReviewRequestedEvent struct {
+	ReviewID     string             `json:"reviewId"`
+	SessionID    string             `json:"sessionId"`
+	Title        string             `json:"title"`
+	PlanFilePath string             `json:"planFilePath"`
+	PlanContent  string             `json:"planContent"`
+	Options      []PlanReviewOption `json:"options"`
+	Tiers        []PlanReviewTier   `json:"tiers,omitempty"`
+}
+
+func (v *PlanReviewRequestedEvent) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "PlanReviewRequestedEvent", v.decodeFrom)
+}
+
+func (v *PlanReviewRequestedEvent) decodeFrom(raw map[string]json.RawMessage) error {
+	var out PlanReviewRequestedEvent
+	d := fieldDecoder{raw: raw, owner: "PlanReviewRequestedEvent"}
+	d.constant("type", "plan_review_requested")
+	d.required("reviewId", &out.ReviewID)
+	d.required("sessionId", &out.SessionID)
+	d.required("title", &out.Title)
+	d.required("planFilePath", &out.PlanFilePath)
+	d.required("planContent", &out.PlanContent)
+	d.required("options", &out.Options)
+	d.optional("tiers", &out.Tiers)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v PlanReviewRequestedEvent) MarshalJSON() ([]byte, error) {
+	type plain PlanReviewRequestedEvent
+	return encodeObject(plain(v), `"type":"plan_review_requested"`, nil)
+}
+
+type PlanReviewResolvedEvent struct {
+	ReviewID  string                    `json:"reviewId"`
+	SessionID string                    `json:"sessionId"`
+	By        PlanReviewResolvedEventBy `json:"by"`
+	Choice    *PlanReviewChoice         `json:"choice,omitempty"`
+}
+
+func (v *PlanReviewResolvedEvent) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "PlanReviewResolvedEvent", v.decodeFrom)
+}
+
+func (v *PlanReviewResolvedEvent) decodeFrom(raw map[string]json.RawMessage) error {
+	var out PlanReviewResolvedEvent
+	d := fieldDecoder{raw: raw, owner: "PlanReviewResolvedEvent"}
+	d.constant("type", "plan_review_resolved")
+	d.required("reviewId", &out.ReviewID)
+	d.required("sessionId", &out.SessionID)
+	d.required("by", &out.By)
+	d.optional("choice", &out.Choice)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+func (v PlanReviewResolvedEvent) MarshalJSON() ([]byte, error) {
+	type plain PlanReviewResolvedEvent
+	return encodeObject(plain(v), `"type":"plan_review_resolved"`, nil)
+}
+
+type PlanReviewResolvedEventBy string
+
+const (
+	PlanReviewResolvedEventByLocal     PlanReviewResolvedEventBy = "local"
+	PlanReviewResolvedEventByExtension PlanReviewResolvedEventBy = "extension"
+)
+
+func (v *PlanReviewResolvedEventBy) UnmarshalJSON(data []byte) error {
+	s, err := decodeString(data, "PlanReviewResolvedEventBy")
+	if err != nil {
+		return err
+	}
+	switch value := PlanReviewResolvedEventBy(s); value {
+	case PlanReviewResolvedEventByLocal, PlanReviewResolvedEventByExtension:
+		*v = value
+		return nil
+	}
+	return unknownValue("PlanReviewResolvedEventBy", s)
+}
+
 // First frame after startup; transport fields are absent on servers without protocol v2.
 type ReadyEvent struct {
 	ProtocolVersion           *int64  `json:"protocolVersion,omitempty"`
@@ -5673,6 +5935,8 @@ type SelectUiRequest struct {
 	ID            string               `json:"id"`
 	Title         string               `json:"title"`
 	Options       []string             `json:"options"`
+	Subagent      *SubagentUIIdentity  `json:"subagent,omitempty"`
+	RootSessionID *string              `json:"rootSessionId,omitempty"`
 	OptionDetails []SelectOptionDetail `json:"optionDetails,omitempty"`
 	Timeout       *int64               `json:"timeout,omitempty"`
 }
@@ -5689,6 +5953,8 @@ func (v *SelectUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.constant("method", "select")
 	d.required("title", &out.Title)
 	d.required("options", &out.Options)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	d.optional("optionDetails", &out.OptionDetails)
 	d.optional("timeout", &out.Timeout)
 	if d.err != nil {
@@ -5704,10 +5970,12 @@ func (v SelectUiRequest) MarshalJSON() ([]byte, error) {
 }
 
 type ConfirmUiRequest struct {
-	ID      string `json:"id"`
-	Title   string `json:"title"`
-	Message string `json:"message"`
-	Timeout *int64 `json:"timeout,omitempty"`
+	ID            string              `json:"id"`
+	Title         string              `json:"title"`
+	Message       string              `json:"message"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
+	Timeout       *int64              `json:"timeout,omitempty"`
 }
 
 func (v *ConfirmUiRequest) UnmarshalJSON(data []byte) error {
@@ -5722,6 +5990,8 @@ func (v *ConfirmUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.constant("method", "confirm")
 	d.required("title", &out.Title)
 	d.required("message", &out.Message)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	d.optional("timeout", &out.Timeout)
 	if d.err != nil {
 		return d.err
@@ -5736,11 +6006,13 @@ func (v ConfirmUiRequest) MarshalJSON() ([]byte, error) {
 }
 
 type InputUiRequest struct {
-	ID          string  `json:"id"`
-	Title       string  `json:"title"`
-	Placeholder *string `json:"placeholder,omitempty"`
-	Timeout     *int64  `json:"timeout,omitempty"`
-	Secret      *bool   `json:"secret,omitempty"`
+	ID            string              `json:"id"`
+	Title         string              `json:"title"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
+	Placeholder   *string             `json:"placeholder,omitempty"`
+	Timeout       *int64              `json:"timeout,omitempty"`
+	Secret        *bool               `json:"secret,omitempty"`
 }
 
 func (v *InputUiRequest) UnmarshalJSON(data []byte) error {
@@ -5754,6 +6026,8 @@ func (v *InputUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("id", &out.ID)
 	d.constant("method", "input")
 	d.required("title", &out.Title)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	d.optional("placeholder", &out.Placeholder)
 	d.optional("timeout", &out.Timeout)
 	d.optional("secret", &out.Secret)
@@ -5770,10 +6044,12 @@ func (v InputUiRequest) MarshalJSON() ([]byte, error) {
 }
 
 type EditorUiRequest struct {
-	ID          string  `json:"id"`
-	Title       string  `json:"title"`
-	Prefill     *string `json:"prefill,omitempty"`
-	PromptStyle *bool   `json:"promptStyle,omitempty"`
+	ID            string              `json:"id"`
+	Title         string              `json:"title"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
+	Prefill       *string             `json:"prefill,omitempty"`
+	PromptStyle   *bool               `json:"promptStyle,omitempty"`
 }
 
 func (v *EditorUiRequest) UnmarshalJSON(data []byte) error {
@@ -5787,6 +6063,8 @@ func (v *EditorUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("id", &out.ID)
 	d.constant("method", "editor")
 	d.required("title", &out.Title)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	d.optional("prefill", &out.Prefill)
 	d.optional("promptStyle", &out.PromptStyle)
 	if d.err != nil {
@@ -5803,9 +6081,11 @@ func (v EditorUiRequest) MarshalJSON() ([]byte, error) {
 
 // Every question of one `ask` tool call; sent only after `set_ask_dialog` enables it.
 type AskUiRequest struct {
-	ID        string        `json:"id"`
-	Questions []AskQuestion `json:"questions"`
-	Timeout   *int64        `json:"timeout,omitempty"`
+	ID            string              `json:"id"`
+	Questions     []AskQuestion       `json:"questions"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
+	Timeout       *int64              `json:"timeout,omitempty"`
 }
 
 func (v *AskUiRequest) UnmarshalJSON(data []byte) error {
@@ -5819,6 +6099,8 @@ func (v *AskUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("id", &out.ID)
 	d.constant("method", "ask")
 	d.required("questions", &out.Questions)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	d.optional("timeout", &out.Timeout)
 	if d.err != nil {
 		return d.err
@@ -5834,8 +6116,10 @@ func (v AskUiRequest) MarshalJSON() ([]byte, error) {
 
 // Close the dialog opened by request `targetId`; a later answer to it is ignored.
 type CancelUiRequest struct {
-	ID       string `json:"id"`
-	TargetID string `json:"targetId"`
+	ID            string              `json:"id"`
+	TargetID      string              `json:"targetId"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
 }
 
 func (v *CancelUiRequest) UnmarshalJSON(data []byte) error {
@@ -5849,6 +6133,8 @@ func (v *CancelUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("id", &out.ID)
 	d.constant("method", "cancel")
 	d.required("targetId", &out.TargetID)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	if d.err != nil {
 		return d.err
 	}
@@ -5862,9 +6148,11 @@ func (v CancelUiRequest) MarshalJSON() ([]byte, error) {
 }
 
 type NotifyUiRequest struct {
-	ID         string      `json:"id"`
-	Message    string      `json:"message"`
-	NotifyType *NotifyType `json:"notifyType,omitempty"`
+	ID            string              `json:"id"`
+	Message       string              `json:"message"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
+	NotifyType    *NotifyType         `json:"notifyType,omitempty"`
 }
 
 func (v *NotifyUiRequest) UnmarshalJSON(data []byte) error {
@@ -5878,6 +6166,8 @@ func (v *NotifyUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("id", &out.ID)
 	d.constant("method", "notify")
 	d.required("message", &out.Message)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	d.optional("notifyType", &out.NotifyType)
 	if d.err != nil {
 		return d.err
@@ -5892,9 +6182,11 @@ func (v NotifyUiRequest) MarshalJSON() ([]byte, error) {
 }
 
 type SetStatusUiRequest struct {
-	ID         string  `json:"id"`
-	StatusKey  string  `json:"statusKey"`
-	StatusText *string `json:"statusText,omitempty"`
+	ID            string              `json:"id"`
+	StatusKey     string              `json:"statusKey"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
+	StatusText    *string             `json:"statusText,omitempty"`
 }
 
 func (v *SetStatusUiRequest) UnmarshalJSON(data []byte) error {
@@ -5908,6 +6200,8 @@ func (v *SetStatusUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("id", &out.ID)
 	d.constant("method", "setStatus")
 	d.required("statusKey", &out.StatusKey)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	d.optional("statusText", &out.StatusText)
 	if d.err != nil {
 		return d.err
@@ -5922,10 +6216,12 @@ func (v SetStatusUiRequest) MarshalJSON() ([]byte, error) {
 }
 
 type SetWidgetUiRequest struct {
-	ID              string           `json:"id"`
-	WidgetKey       string           `json:"widgetKey"`
-	WidgetLines     []string         `json:"widgetLines,omitempty"`
-	WidgetPlacement *WidgetPlacement `json:"widgetPlacement,omitempty"`
+	ID              string              `json:"id"`
+	WidgetKey       string              `json:"widgetKey"`
+	Subagent        *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID   *string             `json:"rootSessionId,omitempty"`
+	WidgetLines     []string            `json:"widgetLines,omitempty"`
+	WidgetPlacement *WidgetPlacement    `json:"widgetPlacement,omitempty"`
 }
 
 func (v *SetWidgetUiRequest) UnmarshalJSON(data []byte) error {
@@ -5939,6 +6235,8 @@ func (v *SetWidgetUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("id", &out.ID)
 	d.constant("method", "setWidget")
 	d.required("widgetKey", &out.WidgetKey)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	d.optional("widgetLines", &out.WidgetLines)
 	d.optional("widgetPlacement", &out.WidgetPlacement)
 	if d.err != nil {
@@ -5954,8 +6252,10 @@ func (v SetWidgetUiRequest) MarshalJSON() ([]byte, error) {
 }
 
 type SetTitleUiRequest struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
+	ID            string              `json:"id"`
+	Title         string              `json:"title"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
 }
 
 func (v *SetTitleUiRequest) UnmarshalJSON(data []byte) error {
@@ -5969,6 +6269,8 @@ func (v *SetTitleUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("id", &out.ID)
 	d.constant("method", "setTitle")
 	d.required("title", &out.Title)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	if d.err != nil {
 		return d.err
 	}
@@ -5982,8 +6284,10 @@ func (v SetTitleUiRequest) MarshalJSON() ([]byte, error) {
 }
 
 type SetEditorTextUiRequest struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
+	ID            string              `json:"id"`
+	Text          string              `json:"text"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
 }
 
 func (v *SetEditorTextUiRequest) UnmarshalJSON(data []byte) error {
@@ -5997,6 +6301,8 @@ func (v *SetEditorTextUiRequest) decodeFrom(raw map[string]json.RawMessage) erro
 	d.required("id", &out.ID)
 	d.constant("method", "set_editor_text")
 	d.required("text", &out.Text)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	if d.err != nil {
 		return d.err
 	}
@@ -6010,8 +6316,10 @@ func (v SetEditorTextUiRequest) MarshalJSON() ([]byte, error) {
 }
 
 type OpenUrlUiRequest struct {
-	ID  string `json:"id"`
-	URL string `json:"url"`
+	ID            string              `json:"id"`
+	URL           string              `json:"url"`
+	Subagent      *SubagentUIIdentity `json:"subagent,omitempty"`
+	RootSessionID *string             `json:"rootSessionId,omitempty"`
 	// Short loopback redirect to `url`; the truncation-safe copy target.
 	LaunchURL    *string `json:"launchUrl,omitempty"`
 	Instructions *string `json:"instructions,omitempty"`
@@ -6028,6 +6336,8 @@ func (v *OpenUrlUiRequest) decodeFrom(raw map[string]json.RawMessage) error {
 	d.required("id", &out.ID)
 	d.constant("method", "open_url")
 	d.required("url", &out.URL)
+	d.optional("subagent", &out.Subagent)
+	d.optional("rootSessionId", &out.RootSessionID)
 	d.optional("launchUrl", &out.LaunchURL)
 	d.optional("instructions", &out.Instructions)
 	if d.err != nil {
@@ -6755,8 +7065,11 @@ type RpcNotificationVariant interface {
 }
 
 func (ReadyEvent) isRpcNotification()                   {}
+func (PlanReviewRequestedEvent) isRpcNotification()     {}
+func (PlanReviewResolvedEvent) isRpcNotification()      {}
 func (PromptResultEvent) isRpcNotification()            {}
 func (SessionSettledEvent) isRpcNotification()          {}
+func (SessionIdentityChangedEvent) isRpcNotification()  {}
 func (ExtensionError) isRpcNotification()               {}
 func (ExtensionUiRequest) isRpcNotification()           {}
 func (AvailableCommandsUpdateEvent) isRpcNotification() {}
@@ -6825,10 +7138,16 @@ func (v *RpcNotification) UnmarshalJSON(data []byte) error {
 	switch tag {
 	case "ready":
 		value, err = decodeVariant[ReadyEvent](raw)
+	case "plan_review_requested":
+		value, err = decodeVariant[PlanReviewRequestedEvent](raw)
+	case "plan_review_resolved":
+		value, err = decodeVariant[PlanReviewResolvedEvent](raw)
 	case "prompt_result":
 		value, err = decodeVariant[PromptResultEvent](raw)
 	case "session_settled":
 		value, err = decodeVariant[SessionSettledEvent](raw)
+	case "session_identity_changed":
+		value, err = decodeVariant[SessionIdentityChangedEvent](raw)
 	case "extension_error":
 		value, err = decodeVariant[ExtensionError](raw)
 	case "extension_ui_request":
@@ -6960,8 +7279,11 @@ func (HostToolCancelRequest) isRpcServerFrame()        {}
 func (HostUriRequest) isRpcServerFrame()               {}
 func (HostUriCancelRequest) isRpcServerFrame()         {}
 func (ReadyEvent) isRpcServerFrame()                   {}
+func (PlanReviewRequestedEvent) isRpcServerFrame()     {}
+func (PlanReviewResolvedEvent) isRpcServerFrame()      {}
 func (PromptResultEvent) isRpcServerFrame()            {}
 func (SessionSettledEvent) isRpcServerFrame()          {}
+func (SessionIdentityChangedEvent) isRpcServerFrame()  {}
 func (ExtensionError) isRpcServerFrame()               {}
 func (ExtensionUiRequest) isRpcServerFrame()           {}
 func (AvailableCommandsUpdateEvent) isRpcServerFrame() {}
@@ -7040,10 +7362,16 @@ func (v *RpcServerFrame) UnmarshalJSON(data []byte) error {
 		value, err = decodeVariant[HostUriCancelRequest](raw)
 	case "ready":
 		value, err = decodeVariant[ReadyEvent](raw)
+	case "plan_review_requested":
+		value, err = decodeVariant[PlanReviewRequestedEvent](raw)
+	case "plan_review_resolved":
+		value, err = decodeVariant[PlanReviewResolvedEvent](raw)
 	case "prompt_result":
 		value, err = decodeVariant[PromptResultEvent](raw)
 	case "session_settled":
 		value, err = decodeVariant[SessionSettledEvent](raw)
+	case "session_identity_changed":
+		value, err = decodeVariant[SessionIdentityChangedEvent](raw)
 	case "extension_error":
 		value, err = decodeVariant[ExtensionError](raw)
 	case "extension_ui_request":
@@ -7155,6 +7483,63 @@ func (v *RpcServerFrame) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	v.Value = value
+	return nil
+}
+
+type OpenPlanReviewResult struct {
+	Opened bool `json:"opened"`
+}
+
+func (v *OpenPlanReviewResult) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "OpenPlanReviewResult", v.decodeFrom)
+}
+
+func (v *OpenPlanReviewResult) decodeFrom(raw map[string]json.RawMessage) error {
+	var out OpenPlanReviewResult
+	d := fieldDecoder{raw: raw, owner: "OpenPlanReviewResult"}
+	d.required("opened", &out.Opened)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type GetPendingPlanReviewResult struct {
+	Review *PlanReviewRequestedEvent `json:"review"`
+}
+
+func (v *GetPendingPlanReviewResult) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "GetPendingPlanReviewResult", v.decodeFrom)
+}
+
+func (v *GetPendingPlanReviewResult) decodeFrom(raw map[string]json.RawMessage) error {
+	var out GetPendingPlanReviewResult
+	d := fieldDecoder{raw: raw, owner: "GetPendingPlanReviewResult"}
+	d.nullable("review", &out.Review)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
+	return nil
+}
+
+type ResolvePlanReviewResult struct {
+	Accepted bool `json:"accepted"`
+}
+
+func (v *ResolvePlanReviewResult) UnmarshalJSON(data []byte) error {
+	return decodeWith(data, "ResolvePlanReviewResult", v.decodeFrom)
+}
+
+func (v *ResolvePlanReviewResult) decodeFrom(raw map[string]json.RawMessage) error {
+	var out ResolvePlanReviewResult
+	d := fieldDecoder{raw: raw, owner: "ResolvePlanReviewResult"}
+	d.required("accepted", &out.Accepted)
+	if d.err != nil {
+		return d.err
+	}
+	*v = out
 	return nil
 }
 
@@ -7751,6 +8136,48 @@ func (v *GetBtwHistoryResult) decodeFrom(raw map[string]json.RawMessage) error {
 	}
 	*v = out
 	return nil
+}
+
+// SetPlanModeCommand holds the parameters of "set_plan_mode".
+type SetPlanModeCommand struct {
+	Enabled bool `json:"enabled"`
+}
+
+// SetPlanMode sends "set_plan_mode": Enter or leave native plan mode.
+func (c Commands) SetPlanMode(ctx context.Context, p SetPlanModeCommand) (PlanModeState, error) {
+	var out PlanModeState
+	err := c.call(ctx, "set_plan_mode", p, 0, &out)
+	return out, err
+}
+
+// OpenPlanReview sends "open_plan_review": Open review of the current plan.
+func (c Commands) OpenPlanReview(ctx context.Context) (bool, error) {
+	var out OpenPlanReviewResult
+	err := c.call(ctx, "open_plan_review", nil, 0, &out)
+	return out.Opened, err
+}
+
+// GetPendingPlanReview sends "get_pending_plan_review": Read the current pending review, including after reconnect.
+func (c Commands) GetPendingPlanReview(ctx context.Context) (*PlanReviewRequestedEvent, error) {
+	var out GetPendingPlanReviewResult
+	err := c.call(ctx, "get_pending_plan_review", nil, 0, &out)
+	return out.Review, err
+}
+
+// ResolvePlanReviewCommand holds the parameters of "resolve_plan_review".
+type ResolvePlanReviewCommand struct {
+	SessionID string           `json:"sessionId"`
+	ReviewID  string           `json:"reviewId"`
+	Choice    PlanReviewChoice `json:"choice"`
+	Feedback  *string          `json:"feedback,omitempty"`
+	Role      *string          `json:"role,omitempty"`
+}
+
+// ResolvePlanReview sends "resolve_plan_review": Resolve a review in its owning session generation.
+func (c Commands) ResolvePlanReview(ctx context.Context, p ResolvePlanReviewCommand) (bool, error) {
+	var out ResolvePlanReviewResult
+	err := c.call(ctx, "resolve_plan_review", p, 0, &out)
+	return out.Accepted, err
 }
 
 // NegotiateProtocolCommand holds the parameters of "negotiate_protocol".
