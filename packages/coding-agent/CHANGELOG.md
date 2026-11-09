@@ -35,6 +35,7 @@
 ### Added
 
 - RPC clients can enter native plan mode, reopen pending reviews, and approve, refine, or save plans with model-tier selection.
+- RPC clients can list and edit the `/settings` panel through `get_settings`, `set_setting`, and `unset_setting`, and read and assign model roles per settings layer through `get_model_roles` and `set_model_role`.
 
 ## [18.18.3] - 2026-11-09
 

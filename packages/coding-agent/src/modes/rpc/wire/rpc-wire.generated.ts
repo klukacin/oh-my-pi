@@ -597,6 +597,79 @@ export interface CompactionResult {
 	providerReplayThroughEntryId?: string;
 }
 
+export interface SettingOption {
+	value: string;
+	label: string;
+	description?: string;
+}
+
+/** A setting as the interactive `/settings` panel defines it, with its stored value. */
+export interface SettingEntry {
+	path: string;
+	tab: string;
+	/** Control the setting edits with. */
+	kind: "boolean" | "enum" | "submenu" | "text" | "multiselect" | "providerLimits";
+	/** Schema type of the stored value. */
+	valueType: string;
+	label: string;
+	description: string;
+	isSet: boolean;
+	/** False while another setting the entry depends on hides it. */
+	visible: boolean;
+	group?: string;
+	warning?: string;
+	options?: SettingOption[];
+	/** A credential: `value` is withheld; `isSet` says whether one is stored. */
+	secret?: boolean;
+	/** Order of a `multiselect` value is meaningful. */
+	ordered?: boolean;
+	value?: unknown;
+	defaultValue?: unknown;
+}
+
+export interface SettingsTab {
+	id: string;
+	label: string;
+	/** Section headings in display order. */
+	groups: string[];
+}
+
+export interface SettingsState {
+	tabs: SettingsTab[];
+	settings: SettingEntry[];
+}
+
+export type ModelRoleScope = "global" | "project";
+
+/** One model role and what each settings layer assigns it. */
+export interface ModelRole {
+	role: string;
+	name: string;
+	/** `kind` roles take an image, search, speech or judge model. */
+	section: "chat" | "kind";
+	/** Settings layer the effective selector comes from. */
+	provenance: string;
+	/** `provider/id` of every available model the role accepts. */
+	models: string[];
+	tag?: string;
+	/** Selector stored in the global config. */
+	global?: string;
+	/** Selector stored in the current project's config. */
+	project?: string;
+	/** Selector in effect after layering. */
+	effective?: string;
+	/** `provider/id` the effective selector resolves to. */
+	resolved?: string;
+}
+
+export interface ModelRolesState {
+	/** Whether role edits may target the project layer. */
+	storage: ModelRoleScope;
+	roles: ModelRole[];
+	/** `provider/id` the session is running. */
+	active?: string;
+}
+
 export interface ModelCycleResult {
 	model: ModelInfo;
 	isScoped: boolean;
@@ -1905,6 +1978,21 @@ export interface GetSessionLeaseResult {
 	unknown: string[];
 }
 
+export interface SetSettingParams {
+	path: string;
+	value: unknown;
+}
+
+export interface UnsetSettingParams {
+	path: string;
+}
+
+export interface SetModelRoleParams {
+	role: string;
+	model: string | null;
+	scope?: ModelRoleScope;
+}
+
 export interface ExportHtmlParams {
 	outputPath?: string;
 }
@@ -2089,6 +2177,11 @@ export interface RpcWireCommands {
 	abort_bash: { params: undefined; result: undefined };
 	get_session_stats: { params: undefined; result: SessionStats };
 	get_session_lease: { params: GetSessionLeaseParams; result: GetSessionLeaseResult };
+	get_settings: { params: undefined; result: SettingsState };
+	set_setting: { params: SetSettingParams; result: SettingEntry };
+	unset_setting: { params: UnsetSettingParams; result: SettingEntry };
+	get_model_roles: { params: undefined; result: ModelRolesState };
+	set_model_role: { params: SetModelRoleParams; result: ModelRolesState };
 	export_html: { params: ExportHtmlParams; result: ExportHtmlResult };
 	switch_session: { params: SwitchSessionParams; result: CancellationResult };
 	branch: { params: BranchParams; result: BranchResult };

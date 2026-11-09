@@ -249,6 +249,11 @@ correlate it via `id`. Ordering across concurrent commands is not guaranteed
 
 - `{ id?, type: "get_session_stats" }`
 - `{ id?, type: "get_session_lease", sessionIds: string[] }` → `data: { held: string[], unknown: string[] }`: which sessions a running omp (this process included) owns, probed without taking their ownership leases. Ids in neither list are free; `unknown` ids could not be probed. `omp session lease --json -- <id>...` answers the same without an RPC child (`--` keeps ids starting with `-` from parsing as options).
+- `{ id?, type: "get_settings" }` → `data: { tabs, settings }`: every setting the interactive `/settings` panel shows, in its tab and section order. Each entry carries `path`, `tab`, `group?`, `kind` (`boolean`, `enum`, `submenu`, `text`, `multiselect`, `providerLimits`), `valueType`, `label`, `description`, `options?`, `value?`, `defaultValue?`, `isSet`, and `visible`. A credential entry has `secret: true` and never carries `value`.
+- `{ id?, type: "set_setting", path: string, value: unknown }` → `data`: the updated entry. Writes the global config after validating `value` against the entry's `kind`; an unknown path or a value outside its choices is an error.
+- `{ id?, type: "unset_setting", path: string }` → `data`: the updated entry. Removes the value from the global config so a project layer, environment variable, or the default applies.
+- `{ id?, type: "get_model_roles" }` → `data: { storage, active?, roles }`: each role's `global`, `project`, and `effective` selector, the `provider/id` it `resolved` to, and the `models` it accepts. `storage` is the `modelRoleStorage` setting.
+- `{ id?, type: "set_model_role", role: string, model: string | null, scope?: "global" | "project" }` → `data`: the updated roles. `model` is a selector such as `provider/id` or `provider/id:high`; `null` clears the role. `scope: "project"` requires `modelRoleStorage` to be `project`, where it is also the default scope. Assigning or clearing `default` switches the running session to the effective default model and emits `model_changed`; other roles only persist.
 - `{ id?, type: "export_html", outputPath?: string }`
 - `{ id?, type: "switch_session", sessionPath: string, provider?: string, modelId?: string }`
 - `{ id?, type: "branch", entryId: string }`

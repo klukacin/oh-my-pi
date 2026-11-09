@@ -55,7 +55,11 @@ import type {
 	RpcResponse,
 	RpcSessionSettledFrame,
 	RpcSessionIdentityChangedFrame,
+	RpcModelRoleScope,
+	RpcModelRolesState,
 	RpcSessionState,
+	RpcSettingEntry,
+	RpcSettingsState,
 	RpcSubagentEventFrame,
 	RpcSubagentLifecycleFrame,
 	RpcSubagentMessagesResult,
@@ -1224,6 +1228,36 @@ export class RpcClient {
 	 */
 	async getSessionLease(sessionIds: string[]): Promise<SessionLeaseReport> {
 		const response = await this.#send({ type: "get_session_lease", sessionIds });
+		return this.#getData(response);
+	}
+
+	/** Every setting the interactive panel shows, with its stored value. */
+	async getSettings(): Promise<RpcSettingsState> {
+		const response = await this.#send({ type: "get_settings" });
+		return this.#getData(response);
+	}
+
+	/** Write one setting to the global config. */
+	async setSetting(path: string, value: unknown): Promise<RpcSettingEntry> {
+		const response = await this.#send({ type: "set_setting", path, value });
+		return this.#getData(response);
+	}
+
+	/** Remove one setting from the global config so another layer or its default applies. */
+	async unsetSetting(path: string): Promise<RpcSettingEntry> {
+		const response = await this.#send({ type: "unset_setting", path });
+		return this.#getData(response);
+	}
+
+	/** Model role assignments per settings layer. */
+	async getModelRoles(): Promise<RpcModelRolesState> {
+		const response = await this.#send({ type: "get_model_roles" });
+		return this.#getData(response);
+	}
+
+	/** Assign a model selector to a role, or clear it with `null`. */
+	async setModelRole(role: string, model: string | null, scope?: RpcModelRoleScope): Promise<RpcModelRolesState> {
+		const response = await this.#send({ type: "set_model_role", role, model, scope });
 		return this.#getData(response);
 	}
 

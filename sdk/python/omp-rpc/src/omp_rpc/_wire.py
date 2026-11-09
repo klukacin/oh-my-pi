@@ -135,6 +135,11 @@ _SLOW_MODE_SCOPE_VALUES: Final[frozenset[str]] = frozenset({"session", "global"}
 _decode_slow_mode_scope = cast("Decoder[SlowModeScope]", literal(_SLOW_MODE_SCOPE_VALUES))
 
 
+ModelRoleScope: TypeAlias = Literal["global", "project"]
+_MODEL_ROLE_SCOPE_VALUES: Final[frozenset[str]] = frozenset({"global", "project"})
+_decode_model_role_scope = cast("Decoder[ModelRoleScope]", literal(_MODEL_ROLE_SCOPE_VALUES))
+
+
 BtwStatus: TypeAlias = Literal["running", "complete", "cancelled", "error", "interrupted"]
 """Side-question turn lifecycle; `interrupted` marks a turn whose process died while it ran."""
 _BTW_STATUS_VALUES: Final[frozenset[str]] = frozenset({"running", "complete", "cancelled", "error", "interrupted"})
@@ -759,6 +764,83 @@ class CompactionResult:
     details: JsonValue | None = None
     preserve_data: JsonObject | None = None
     provider_replay_through_entry_id: str | None = None
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class SettingOption:
+    value: str
+    label: str
+    description: str | None = None
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class SettingEntry:
+    """A setting as the interactive `/settings` panel defines it, with its stored value."""
+    path: str
+    tab: str
+    kind: Literal["boolean", "enum", "submenu", "text", "multiselect", "providerLimits"]
+    """Control the setting edits with."""
+    value_type: str
+    """Schema type of the stored value."""
+    label: str
+    description: str
+    is_set: bool
+    visible: bool
+    """False while another setting the entry depends on hides it."""
+    group: str | None = None
+    warning: str | None = None
+    options: tuple[SettingOption, ...] | None = None
+    secret: bool | None = None
+    """A credential: `value` is withheld; `isSet` says whether one is stored."""
+    ordered: bool | None = None
+    """Order of a `multiselect` value is meaningful."""
+    value: JsonValue | None = None
+    default_value: JsonValue | None = None
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class SettingsTab:
+    id: str
+    label: str
+    groups: tuple[str, ...]
+    """Section headings in display order."""
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class SettingsState:
+    tabs: tuple[SettingsTab, ...]
+    settings: tuple[SettingEntry, ...]
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class ModelRole:
+    """One model role and what each settings layer assigns it."""
+    role: str
+    name: str
+    section: Literal["chat", "kind"]
+    """`kind` roles take an image, search, speech or judge model."""
+    provenance: str
+    """Settings layer the effective selector comes from."""
+    models: tuple[str, ...]
+    """`provider/id` of every available model the role accepts."""
+    tag: str | None = None
+    global_: str | None = None
+    """Selector stored in the global config."""
+    project: str | None = None
+    """Selector stored in the current project's config."""
+    effective: str | None = None
+    """Selector in effect after layering."""
+    resolved: str | None = None
+    """`provider/id` the effective selector resolves to."""
+
+
+@dataclass(slots=True, frozen=True, kw_only=True)
+class ModelRolesState:
+    storage: ModelRoleScope
+    """Whether role edits may target the project layer."""
+    roles: tuple[ModelRole, ...]
+    active: str | None = None
+    """`provider/id` the session is running."""
 
 
 @dataclass(slots=True, frozen=True, kw_only=True)
@@ -2237,6 +2319,78 @@ def parse_compaction_result(value: object, path: str = "CompactionResult") -> Co
         details=optional(payload, "details", decode_json, path),
         preserve_data=optional(payload, "preserveData", decode_json_object, path),
         provider_replay_through_entry_id=optional(payload, "providerReplayThroughEntryId", decode_str, path),
+    )
+
+
+def parse_setting_option(value: object, path: str = "SettingOption") -> SettingOption:
+    payload = expect_object(value, path)
+    return SettingOption(
+        value=required(payload, "value", decode_str, path),
+        label=required(payload, "label", decode_str, path),
+        description=optional(payload, "description", decode_str, path),
+    )
+
+
+def parse_setting_entry(value: object, path: str = "SettingEntry") -> SettingEntry:
+    payload = expect_object(value, path)
+    return SettingEntry(
+        path=required(payload, "path", decode_str, path),
+        tab=required(payload, "tab", decode_str, path),
+        kind=required(payload, "kind", cast('Decoder[Literal["boolean", "enum", "submenu", "text", "multiselect", "providerLimits"]]', literal(frozenset({"boolean", "enum", "submenu", "text", "multiselect", "providerLimits"}))), path),
+        value_type=required(payload, "valueType", decode_str, path),
+        label=required(payload, "label", decode_str, path),
+        description=required(payload, "description", decode_str, path),
+        is_set=required(payload, "isSet", decode_bool, path),
+        visible=required(payload, "visible", decode_bool, path),
+        group=optional(payload, "group", decode_str, path),
+        warning=optional(payload, "warning", decode_str, path),
+        options=optional(payload, "options", array(parse_setting_option), path),
+        secret=optional(payload, "secret", decode_bool, path),
+        ordered=optional(payload, "ordered", decode_bool, path),
+        value=optional(payload, "value", decode_json, path),
+        default_value=optional(payload, "defaultValue", decode_json, path),
+    )
+
+
+def parse_settings_tab(value: object, path: str = "SettingsTab") -> SettingsTab:
+    payload = expect_object(value, path)
+    return SettingsTab(
+        id=required(payload, "id", decode_str, path),
+        label=required(payload, "label", decode_str, path),
+        groups=required(payload, "groups", array(decode_str), path),
+    )
+
+
+def parse_settings_state(value: object, path: str = "SettingsState") -> SettingsState:
+    payload = expect_object(value, path)
+    return SettingsState(
+        tabs=required(payload, "tabs", array(parse_settings_tab), path),
+        settings=required(payload, "settings", array(parse_setting_entry), path),
+    )
+
+
+def parse_model_role(value: object, path: str = "ModelRole") -> ModelRole:
+    payload = expect_object(value, path)
+    return ModelRole(
+        role=required(payload, "role", decode_str, path),
+        name=required(payload, "name", decode_str, path),
+        section=required(payload, "section", cast('Decoder[Literal["chat", "kind"]]', literal(frozenset({"chat", "kind"}))), path),
+        provenance=required(payload, "provenance", decode_str, path),
+        models=required(payload, "models", array(decode_str), path),
+        tag=optional(payload, "tag", decode_str, path),
+        global_=optional(payload, "global", decode_str, path),
+        project=optional(payload, "project", decode_str, path),
+        effective=optional(payload, "effective", decode_str, path),
+        resolved=optional(payload, "resolved", decode_str, path),
+    )
+
+
+def parse_model_roles_state(value: object, path: str = "ModelRolesState") -> ModelRolesState:
+    payload = expect_object(value, path)
+    return ModelRolesState(
+        storage=required(payload, "storage", _decode_model_role_scope, path),
+        roles=required(payload, "roles", array(parse_model_role), path),
+        active=optional(payload, "active", decode_str, path),
     )
 
 
@@ -3871,6 +4025,38 @@ class WireClient:
         params["sessionIds"] = list(session_ids)
         return parse_get_session_lease_result(self._command("get_session_lease", params), "get_session_lease")
 
+    def get_settings(self) -> SettingsState:
+        """Every setting the interactive panel shows, with its value."""
+        params: dict[str, object] = {}
+        return parse_settings_state(self._command("get_settings", params), "get_settings")
+
+    def set_setting(self, path: str, value: JsonValue) -> SettingEntry:
+        """Write one setting to the global config."""
+        params: dict[str, object] = {}
+        params["path"] = path
+        params["value"] = value
+        return parse_setting_entry(self._command("set_setting", params), "set_setting")
+
+    def unset_setting(self, path: str) -> SettingEntry:
+        """Remove one setting from the global config so another layer or its default applies."""
+        params: dict[str, object] = {}
+        params["path"] = path
+        return parse_setting_entry(self._command("unset_setting", params), "unset_setting")
+
+    def get_model_roles(self) -> ModelRolesState:
+        """Model role assignments per settings layer."""
+        params: dict[str, object] = {}
+        return parse_model_roles_state(self._command("get_model_roles", params), "get_model_roles")
+
+    def set_model_role(self, role: str, model: str | None, *, scope: ModelRoleScope | None = None) -> ModelRolesState:
+        """Assign a model selector to a role, or clear it with `null`. The default role also switches the running session."""
+        params: dict[str, object] = {}
+        params["role"] = role
+        params["model"] = model
+        if scope is not None:
+            params["scope"] = scope
+        return parse_model_roles_state(self._command("set_model_role", params), "set_model_role")
+
     def export_html(self, output_path: str | Path | None = None) -> Path:
         """Export the session as HTML; returns the written path."""
         params: dict[str, object] = {}
@@ -4365,6 +4551,9 @@ __all__ = [
     "ModelCost",
     "ModelCycleResult",
     "ModelInfo",
+    "ModelRole",
+    "ModelRoleScope",
+    "ModelRolesState",
     "NavigateTreeResult",
     "NegotiateProtocolResult",
     "NoticeEvent",
@@ -4413,6 +4602,10 @@ __all__ = [
     "SetStatusUiRequest",
     "SetTitleUiRequest",
     "SetWidgetUiRequest",
+    "SettingEntry",
+    "SettingOption",
+    "SettingsState",
+    "SettingsTab",
     "SlashCommandInput",
     "SlashCommandSource",
     "SlashSubcommand",
@@ -4558,6 +4751,8 @@ __all__ = [
     "parse_model_cost",
     "parse_model_cycle_result",
     "parse_model_info",
+    "parse_model_role",
+    "parse_model_roles_state",
     "parse_navigate_tree_result",
     "parse_negotiate_protocol_result",
     "parse_notice_event",
@@ -4601,6 +4796,10 @@ __all__ = [
     "parse_set_status_ui_request",
     "parse_set_title_ui_request",
     "parse_set_widget_ui_request",
+    "parse_setting_entry",
+    "parse_setting_option",
+    "parse_settings_state",
+    "parse_settings_tab",
     "parse_slash_command_input",
     "parse_slash_subcommand",
     "parse_subagent_event",
