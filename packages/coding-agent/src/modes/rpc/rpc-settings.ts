@@ -79,6 +79,10 @@ export function rpcSettingsState(session: AgentSession): RpcSettingsState {
 	};
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function coerceSettingValue(def: SettingDef, value: unknown, settings: SettingsHost): unknown {
 	const invalid = (expected: string): never => {
 		throw new Error(`${def.path} expects ${expected}`);
@@ -110,12 +114,11 @@ function coerceSettingValue(def: SettingDef, value: unknown, settings: SettingsH
 				: invalid(`values from ${[...allowed].join(", ")}`);
 		}
 		case "providerLimits":
-			return settings.validateProviderLimits(value);
+			// Normalization turns anything that is not a map into an empty one, which would clear every limit.
+			return isPlainObject(value) ? settings.validateProviderLimits(value) : invalid("an object");
 		case "text":
 			if (def.schemaType === "array") return Array.isArray(value) ? value : invalid("an array");
-			if (def.schemaType === "record") {
-				return value !== null && typeof value === "object" && !Array.isArray(value) ? value : invalid("an object");
-			}
+			if (def.schemaType === "record") return isPlainObject(value) ? value : invalid("an object");
 			return typeof value === "string" ? value : invalid("a string");
 	}
 }

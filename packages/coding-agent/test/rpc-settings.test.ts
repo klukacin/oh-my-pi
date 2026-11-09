@@ -54,6 +54,26 @@ describe("RPC settings and model roles", () => {
 		expect(await rpc.unsetSetting("modelRoleStorage")).toMatchObject({ value: "global" });
 	}, 30_000);
 
+	test("rejects a map setting written as anything but an object", async () => {
+		const rpc = client!;
+		const limits = "providers.maxInFlightRequests";
+		expect(await rpc.setSetting(limits, { openai: 2 })).toMatchObject({ value: { openai: 2 } });
+		for (const value of [[], null, "openai=1", 3]) {
+			expect(await rejectionOf(rpc.setSetting(limits, value))).toMatchObject({
+				message: `${limits} expects an object`,
+			});
+		}
+		const record = (await rpc.getSettings()).settings.find(
+			setting => setting.kind === "text" && setting.valueType === "record",
+		);
+		expect(record).toBeDefined();
+		expect(await rejectionOf(rpc.setSetting(record!.path, []))).toMatchObject({
+			message: `${record!.path} expects an object`,
+		});
+		const stored = (await rpc.getSettings()).settings.find(setting => setting.path === limits);
+		expect(stored?.value).toEqual({ openai: 2 });
+	}, 30_000);
+
 	test("never returns a stored credential", async () => {
 		const rpc = client!;
 		const secret = (await rpc.getSettings()).settings.find(setting => setting.secret === true);
