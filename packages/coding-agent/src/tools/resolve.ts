@@ -35,6 +35,7 @@ import type { ToolSession } from ".";
 
 import { ToolError } from "@oh-my-pi/pi-tui/tools/tool-errors";
 import type { XdevDispatch } from "./xdev";
+import type { PlanApprovalDetails } from "../plan-mode/approved-plan";
 
 /** The plain-text resolution device URLs (`xd://resolve`, …). */
 export const RESOLVE_DEVICE_PATH = `${XD_URL_PREFIX}${RESOLVE_DEVICE_NAME}`;
@@ -101,6 +102,23 @@ export function writeDeviceDispatch(toolName: string, result: unknown): XdevDisp
 	if (!xdev || typeof xdev !== "object" || !("tool" in xdev) || !("mode" in xdev)) return undefined;
 	// Envelope verified above; the write tool stored a real XdevDispatch here.
 	return xdev as XdevDispatch;
+}
+
+export function planApprovalDispatchDetails(toolName: string, result: unknown): PlanApprovalDetails | undefined {
+	const dispatch = writeDeviceDispatch(toolName, result);
+	const details = dispatch?.tool === PROPOSE_DEVICE_NAME && dispatch.mode === "execute" ? dispatch.inner : undefined;
+	if (
+		!details ||
+		typeof details !== "object" ||
+		!("planFilePath" in details) ||
+		typeof details.planFilePath !== "string" ||
+		!("title" in details) ||
+		typeof details.title !== "string" ||
+		!("planExists" in details) ||
+		typeof details.planExists !== "boolean"
+	)
+		return undefined;
+	return { planFilePath: details.planFilePath, title: details.title, planExists: details.planExists };
 }
 
 /** Handler installed by plan mode; `xd://propose` dispatches the written plan title to it. */

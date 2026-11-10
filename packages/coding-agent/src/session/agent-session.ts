@@ -2165,16 +2165,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 				isHiddenUserCompanion(previous) && (isHiddenUserCompanion(next) || isUserQueuedMessage(next)),
 		);
 		this.sessionManager = config.sessionManager;
-		// Only a recorded approval may turn a draft file into an execution reference.
-		for (const entry of this.sessionManager.getBranch().reverse()) {
-			if (entry.type !== "mode_change") continue;
-			if (entry.mode === "plan" || entry.mode === "plan_paused") break;
-			if (typeof entry.data?.approvedPlanFilePath === "string") {
-				this.#planReferencePath = entry.data.approvedPlanFilePath;
-				this.#planReferenceApproved = true;
-				break;
-			}
-		}
+		this.#restorePlanReferenceFromBranch();
 		this.settings = config.settings;
 		this.#ownsCostGate = config.costGate === undefined;
 		this.#costGate = config.costGate ?? this.#createCostGate();
@@ -8154,6 +8145,22 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		return this.#goalRuntime;
 	}
 
+	#restorePlanReferenceFromBranch(): void {
+		this.#planReferenceSent = false;
+		this.#planReferencePath = "local://PLAN.md";
+		this.#planReferenceApproved = false;
+		// Only a recorded approval may turn a draft file into an execution reference.
+		for (const entry of this.sessionManager.getBranch().reverse()) {
+			if (entry.type !== "mode_change") continue;
+			if (entry.mode === "plan" || entry.mode === "plan_paused") break;
+			if (typeof entry.data?.approvedPlanFilePath === "string") {
+				this.#planReferencePath = entry.data.approvedPlanFilePath;
+				this.#planReferenceApproved = true;
+				break;
+			}
+		}
+	}
+
 	markPlanReferenceSent(): void {
 		this.#planReferenceSent = true;
 	}
@@ -14053,6 +14060,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 		// #rehydrateCheckpointRewindState(), which clears and rebuilds all four
 		// fields from the target branch. On rollback every one must be restored,
 		// or a failed switch leaks the target session's checkpoint state.
+		const previousPlanReferenceSent = this.#planReferenceSent;
+		const previousPlanReferencePath = this.#planReferencePath;
+		const previousPlanReferenceApproved = this.#planReferenceApproved;
 		const previousCheckpointState = this.#checkpointState;
 		const previousPendingRewindReport = this.#pendingRewindReport;
 		const previousLastCompletedRewind = this.#lastCompletedRewind;
@@ -14088,6 +14098,7 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			// switch rolled back via restoreState); re-read it on the next model call either way.
 			this.#sessionInit = undefined;
 			await this.sessionManager.setSessionFile(sessionPath);
+			this.#restorePlanReferenceFromBranch();
 			this.#bash.markSessionTransition(bashTransition);
 			const newCwd = this.sessionManager.getCwd();
 			const recordedCwd = this.sessionManager.getRecordedCwd() ?? previousSessionState.cwd;
@@ -14307,6 +14318,9 @@ export class AgentSession implements SettingsScope, AgentViewSession {
 			return true;
 		} catch (error) {
 			this.sessionManager.restoreState(previousSessionState);
+			this.#planReferenceSent = previousPlanReferenceSent;
+			this.#planReferencePath = previousPlanReferencePath;
+			this.#planReferenceApproved = previousPlanReferenceApproved;
 			this.#freshProviderSessionId = previousFreshProviderSessionId;
 			this.#syncAgentSessionId(previousSessionState.sessionId, false);
 			this.#memory.rekeyForCurrentSessionId();

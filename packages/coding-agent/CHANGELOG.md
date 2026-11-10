@@ -8,7 +8,9 @@
 
 ### Fixed
 
-- Plans approved over RPC remain available after resuming the session ([#18610](https://github.com/can1357/oh-my-pi/issues/18610)).
+- RPC plan proposals open reviews automatically, host-set plan mode survives startup, and nested extension session changes finish without blocking dictation ([#1](https://github.com/klukacin/oh-my-pi/pull/1) by [@klukacin](https://github.com/klukacin)).
+- Plans approved over RPC remain available after resuming through `switch_session` or reopening the session file ([#18610](https://github.com/can1357/oh-my-pi/issues/18610)).
+
 ## [18.18.6] - 2026-11-09
 
 ### Added

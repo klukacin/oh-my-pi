@@ -62,8 +62,7 @@ import { recoverAskHtml } from "../../tools/ask";
 import { fieldQuestions } from "@oh-my-pi/pi-tui/html-form/data";
 import { parseHtmlForm } from "@oh-my-pi/pi-tui/html-form/parse";
 import { previewLine, PREVIEW_LIMITS, TRUNCATE_LENGTHS } from "@oh-my-pi/pi-tui/render/render-utils";
-import { PROPOSE_DEVICE_NAME } from "@oh-my-pi/pi-tui/tools/resolve";
-import { writeDeviceDispatch } from "../../tools/resolve";
+import { planApprovalDispatchDetails } from "../../tools/resolve";
 import { SpeechEnhancer } from "../../tts/speech-enhancer";
 import { vocalizer } from "../../tts/vocalizer";
 import { canonicalizeMessage } from "@oh-my-pi/pi-tui/chat/thinking-display";
@@ -2425,19 +2424,8 @@ export class EventController {
 		// Plan approval rides a `write` to xd://propose: the dispatch metadata on
 		// the write details carries the approval payload as `inner`.
 		if (!event.isError) {
-			const dispatch = writeDeviceDispatch(event.toolName, event.result);
-			const details =
-				dispatch?.tool === PROPOSE_DEVICE_NAME && dispatch.mode === "execute" ? dispatch.inner : undefined;
-			if (
-				details &&
-				typeof details === "object" &&
-				"planFilePath" in details &&
-				"title" in details &&
-				"planExists" in details &&
-				typeof details.planFilePath === "string" &&
-				typeof details.title === "string" &&
-				typeof details.planExists === "boolean"
-			) {
+			const details = planApprovalDispatchDetails(event.toolName, event.result);
+			if (details) {
 				// Dispatch the approval WITHOUT blocking the serialized event
 				// dispatch chain. `handlePlanApproval` -> `#approvePlan` awaits
 				// `session.prompt` for the ENTIRE approved-execution turn; awaiting

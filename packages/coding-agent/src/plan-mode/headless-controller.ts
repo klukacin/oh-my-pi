@@ -1,5 +1,6 @@
 import { persistPendingPlanReview, readPendingPlanReview } from "./restore-state";
 import * as path from "node:path";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { AgentBusyError } from "@oh-my-pi/pi-agent-core";
 import { CompactionCancelledError, type CompactionOutcome } from "@oh-my-pi/pi-agent-core/compaction";
 import { modelsAreEqual } from "@oh-my-pi/pi-catalog/models";
@@ -27,6 +28,7 @@ import { listPlanFiles, readPlanFile, resolvePlanFilePath } from "./plan-files";
 import { planSaveFileName } from "./plan-autosave";
 import { type PlanReviewInput, validatePlanReviewChoice } from "./review-choice";
 import { cfgPlanEnabled } from "./settings";
+import { planApprovalDispatchDetails } from "../tools/resolve";
 import { shouldEnterPlanModeOnStartup } from "./startup";
 
 export interface HeadlessPlanOptions {
@@ -67,6 +69,7 @@ export class HeadlessPlanController implements NativePlanHost {
 	#eventDelivery: Promise<void> = Promise.resolve();
 	#opening = false;
 	#transitioning = false;
+	#sessionChangeScope = new AsyncLocalStorage<{ active: boolean }>();
 	#settling: { generation: number } | undefined;
 	#modelChanges = 0;
 
@@ -80,25 +83,8 @@ export class HeadlessPlanController implements NativePlanHost {
 		this.#unsubscribe = session.subscribe(event => {
 			if (event.type === "agent_end") this.#background(this.#flushModel());
 			if (event.type !== "tool_execution_end" || event.isError || !this.planModeEnabled) return;
-			const details = event.result?.details;
-			if (
-				details &&
-				typeof details === "object" &&
-				"planFilePath" in details &&
-				"title" in details &&
-				"planExists" in details &&
-				typeof details.planFilePath === "string" &&
-				typeof details.title === "string" &&
-				typeof details.planExists === "boolean"
-			) {
-				this.#background(
-					this.handleApproval({
-						planFilePath: details.planFilePath,
-						title: details.title,
-						planExists: details.planExists,
-					}),
-				);
-			}
+			const details = planApprovalDispatchDetails(event.toolName, event.result);
+			if (details) this.#background(this.handleApproval(details));
 		});
 		this.#unlisten = cfgModelRoles.listen(session.settings, () => {
 			if (this.planModeEnabled) this.#background(this.#applyPlanModel());
@@ -136,12 +122,15 @@ export class HeadlessPlanController implements NativePlanHost {
 		return this.#settling !== undefined || this.#opening || this.#transitioning || this.#modelChanges > 0;
 	}
 	async withSessionChange<T>(change: () => Promise<T>): Promise<T> {
+		if (this.#sessionChangeScope.getStore()?.active) return await change();
 		if (this.transitionPending) throw new Error("Plan transition is still running");
 		this.#transitioning = true;
 		this.cancel({ preservePending: true });
+		const owner = { active: true };
 		try {
-			return await change();
+			return await this.#sessionChangeScope.run(owner, change);
 		} finally {
+			owner.active = false;
 			this.#transitioning = false;
 			await this.restore();
 		}
@@ -162,18 +151,19 @@ export class HeadlessPlanController implements NativePlanHost {
 		}
 		return this.#pending ? structuredClone(this.#pending.request) : undefined;
 	}
-	async restore(): Promise<void> {
+	async restore(options?: { preserveSessionPlan?: boolean }): Promise<void> {
 		if (this.transitionPending) throw new Error("Plan transition is still running");
 		this.#transitioning = true;
 		try {
-			await this.#restore();
+			await this.#restore(options?.preserveSessionPlan);
 		} finally {
 			this.#transitioning = false;
 		}
 		if (this.#pending) this.#emit(this.#pending.request);
 	}
-	async #restore(): Promise<void> {
+	async #restore(preserveSessionPlan = false): Promise<void> {
 		if (this.#settling !== undefined) throw new Error("Plan transition is still running");
+		const activePlan = preserveSessionPlan ? this.session.getPlanModeState() : undefined;
 		this.cancel({ preservePending: true });
 		this.#sessionId = this.sessionManager.getSessionId();
 		this.planModeEnabled = false;
@@ -186,10 +176,12 @@ export class HeadlessPlanController implements NativePlanHost {
 		this.session.setPlanProposalHandler(null);
 		const context = this.sessionManager.buildSessionContext();
 		if (!cfgPlanEnabled.get(this.session.settings)) return;
-		if (context.mode === "plan") {
+		if (context.mode === "plan" || activePlan?.enabled) {
 			const planFilePath =
-				typeof context.modeData?.planFilePath === "string" ? context.modeData.planFilePath : undefined;
-			await enterNativePlanMode(this, { planFilePath, preserveRestoredModel: true });
+				typeof context.modeData?.planFilePath === "string"
+					? context.modeData.planFilePath
+					: activePlan?.planFilePath;
+			await enterNativePlanMode(this, { planFilePath, workflow: activePlan?.workflow, preserveRestoredModel: true });
 			const pending = readPendingPlanReview(this.session);
 			if (pending) await this.#openReview({ ...pending, planExists: true }, false, true);
 		} else if (context.mode === "plan_paused") {

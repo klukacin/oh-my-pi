@@ -1492,7 +1492,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions 
 			});
 		},
 	});
-	await planController.restore();
+	await planController.restore({ preserveSessionPlan: true });
 
 	const pendingExtensionRequests = new RpcPendingExtensionRequests();
 	const hostToolBridge = new RpcHostToolBridge(output);

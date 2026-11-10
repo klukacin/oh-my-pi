@@ -101,9 +101,15 @@ await runRpcMode(session);
 	}
 });
 
-it.each(["keep", "execute"] as const)(
-	"restores a plan approved over RPC with %s after reloading the session",
-	async choice => {
+it.each([
+	{ choice: "keep", resume: "constructor" },
+	{ choice: "execute", resume: "constructor" },
+	{ choice: "keep", resume: "switch_session" },
+	{ choice: "execute", resume: "switch_session" },
+	{ choice: "draft", resume: "switch_session" },
+] as const)(
+	"restores $choice plan approval through $resume without injecting unapproved drafts",
+	async ({ choice, resume }) => {
 		await using temp = await TempDir.create("@rpc-approved-plan-");
 		const sourceDir = path.resolve(import.meta.dir, "../src");
 		const fixture = temp.join("runtime.ts");
@@ -113,10 +119,15 @@ it.each(["keep", "execute"] as const)(
 import { createAgentSession, Settings } from ${JSON.stringify(path.join(sourceDir, "sdk.ts"))};
 import { runRpcMode } from ${JSON.stringify(path.join(sourceDir, "modes/rpc/rpc-mode.ts"))};
 import { resolveLocalRoot } from ${JSON.stringify(path.join(sourceDir, "internal-urls/index.ts"))};
+import { createMockModel } from ${JSON.stringify(path.resolve(sourceDir, "../../ai/src/providers/mock.ts"))};
+import { createInMemoryAuthStorage } from ${JSON.stringify(path.join(import.meta.dir, "helpers/agent-session-setup.ts"))};
 globalThis.fetch = async () => { throw new Error("Offline plan fixture refuses network"); };
-const { session } = await createAgentSession({ cwd:process.cwd(), toolNames:[], enableMCP:false, enableLsp:false, disableExtensionDiscovery:true, settings:Settings.isolated({"compaction.enabled":false}) });
+const authStorage = createInMemoryAuthStorage();
+authStorage.keys.setRuntime("anthropic", "test-key");
+const { session } = await createAgentSession({ authStorage, cwd:process.cwd(), toolNames:[], enableMCP:false, enableLsp:false, disableExtensionDiscovery:true, settings:Settings.isolated({"compaction.enabled":false}) });
 // Approval queues execution; this fixture persists the approval without calling a provider.
-session.prompt = async () => {};
+session.agent.streamFn = createMockModel({ handler: () => ({ content: ["Resumed"] }) }).stream;
+if (process.argv[2] !== "resume") session.prompt = async () => {};
 const local = resolveLocalRoot({getArtifactsDir:()=>session.sessionManager.getArtifactsDir(),getSessionId:()=>session.sessionId});
 await Bun.write(local+"/fixture-plan.md", "# Approved plan\\n\\nKeep this plan after resume.\\n");
 await runRpcMode(session);
@@ -145,14 +156,57 @@ await runRpcMode(session);
 			const review = await client.getPendingPlanReview();
 			if (!review) throw new Error("Expected pending review");
 			approvedPath = review.planFilePath;
-			expect(await client.resolvePlanReview(initial.sessionId, review.reviewId, choice)).toBe(true);
+			if (choice === "draft") await client.setPlanMode(false);
+			else expect(await client.resolvePlanReview(initial.sessionId, review.reviewId, choice)).toBe(true);
 			await client.waitForSettled();
 			const state = await client.getState();
 			if (!state.sessionFile) throw new Error("Expected persisted session");
 			sessionFile = state.sessionFile;
-			expect(state.sessionId === initial.sessionId).toBe(choice === "keep");
+			expect(state.sessionId === initial.sessionId).toBe(choice !== "execute");
 		} finally {
 			await client.stop();
+		}
+		if (resume === "switch_session") {
+			using switched = new RpcClient({
+				command: () => [process.execPath, fixture, "resume"],
+				cwd: temp.path(),
+				env: {
+					HOME: temp.join("home"),
+					PI_CODING_AGENT_DIR: temp.join("agent"),
+					XDG_CONFIG_HOME: temp.join("config"),
+					XDG_DATA_HOME: temp.join("data"),
+					XDG_CACHE_HOME: temp.join("cache"),
+					CI: "true",
+					PI_NO_TITLE: "1",
+				},
+			});
+			try {
+				await switched.start();
+				await switched.setPlanMode(true);
+				await switched.setPlanMode(false);
+				const draftFile = (await switched.getState()).sessionFile!;
+				await switched.switchSession(sessionFile);
+				await switched.promptAndWait("Continue with the approved plan");
+				const reference = (await switched.getMessages()).find(
+					message => message.role === "custom" && message.customType === "plan-mode-reference",
+				);
+				if (choice === "draft") expect(reference).toBeUndefined();
+				else {
+					if (reference?.role !== "custom") throw new Error("Expected approved plan after switch_session");
+					expect(reference.content).toContain(approvedPath);
+					expect(reference.content).toContain("Keep this plan after resume.");
+					await switched.switchSession(draftFile);
+					await switched.promptAndWait("Continue with this unapproved draft");
+					expect(
+						(await switched.getMessages()).find(
+							message => message.role === "custom" && message.customType === "plan-mode-reference",
+						),
+					).toBeUndefined();
+				}
+			} finally {
+				await switched.stop();
+			}
+			return;
 		}
 		const manager = await SessionManager.open(sessionFile, temp.path());
 		const auth = createInMemoryAuthStorage();
