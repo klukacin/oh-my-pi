@@ -307,3 +307,17 @@ it("restores model and tool snapshots from the active branch rather than a later
 	expect(restored.model?.model.id).toBe(firstModel.id);
 	expect(restored.tools?.enabled).toEqual(["read"]);
 });
+
+it("exiting a headless plan closes its pending review without approving the draft", async () => {
+	const request = await review();
+	await controller.exit();
+	expect(controller.getPending()).toBeUndefined();
+	expect(controller.resolve(request.reviewId, "keep")).toBe(false);
+	expect(session.sessionManager.buildSessionContext().mode).toBe("none");
+	expect(
+		session.sessionManager
+			.getBranch()
+			.some(entry => entry.type === "mode_change" && entry.data?.approvedPlanFilePath),
+	).toBe(false);
+	expect(prompts).toEqual([]);
+});

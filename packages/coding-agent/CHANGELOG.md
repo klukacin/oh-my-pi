@@ -5,6 +5,10 @@
 ### Added
 
 - RPC clients can enter native plan mode, reopen pending reviews, and approve, refine, or save plans with model-tier selection.
+
+### Fixed
+
+- Plans approved over RPC remain available after resuming the session ([#18610](https://github.com/can1357/oh-my-pi/issues/18610)).
 ## [18.18.6] - 2026-11-09
 
 ### Added

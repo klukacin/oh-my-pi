@@ -361,6 +361,7 @@ export async function approveNativePlan(
 	);
 	host.assertActive?.();
 	host.session.setPlanReferencePath(options.planFilePath);
+	host.sessionManager.appendModeChange("none", { approvedPlanFilePath: options.planFilePath });
 	try {
 		const autosaved = await autosaveApprovedPlan({
 			settings: host.session.settings,
