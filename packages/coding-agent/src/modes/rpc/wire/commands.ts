@@ -310,6 +310,26 @@ export const rpcCommands: readonly RpcCommandSpec[] = [
 		params: { sessionIds: "string[]" },
 		result: { held: "string[]", unknown: "string[]" },
 	},
+	{ name: "get_settings", doc: "Every setting the interactive panel shows, with its value.", result: "SettingsState" },
+	{
+		name: "set_setting",
+		doc: "Write one setting to the global config.",
+		params: { path: "string", value: "unknown" },
+		result: "SettingEntry",
+	},
+	{
+		name: "unset_setting",
+		doc: "Remove one setting from the global config so another layer or its default applies.",
+		params: { path: "string" },
+		result: "SettingEntry",
+	},
+	{ name: "get_model_roles", doc: "Model role assignments per settings layer.", result: "ModelRolesState" },
+	{
+		name: "set_model_role",
+		doc: "Assign a model selector to a role, or clear it with `null`. The default role also switches the running session.",
+		params: { role: "string", model: "string | null", "scope?": "ModelRoleScope" },
+		result: "ModelRolesState",
+	},
 	{
 		name: "export_html",
 		doc: "Export the session as HTML; returns the written path.",

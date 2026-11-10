@@ -1,3 +1,5 @@
+import { createMockModel } from "@oh-my-pi/pi-ai/providers/mock";
+import { createAgentSession } from "../src/sdk";
 import { persistPlanRestoreState, readPlanRestoreState } from "../src/plan-mode/restore-state";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "bun:test";
 import * as path from "node:path";
@@ -306,4 +308,77 @@ it("restores model and tool snapshots from the active branch rather than a later
 	const restored = readPlanRestoreState(session);
 	expect(restored.model?.model.id).toBe(firstModel.id);
 	expect(restored.tools?.enabled).toEqual(["read"]);
+});
+
+it("exiting a headless plan closes its pending review without approving the draft", async () => {
+	const request = await review();
+	await controller.exit();
+	expect(controller.getPending()).toBeUndefined();
+	expect(controller.resolve(request.reviewId, "keep")).toBe(false);
+	expect(session.sessionManager.buildSessionContext().mode).toBe("none");
+	expect(
+		session.sessionManager
+			.getBranch()
+			.some(entry => entry.type === "mode_change" && entry.data?.approvedPlanFilePath),
+	).toBe(false);
+	expect(prompts).toEqual([]);
+});
+
+it("opens a headless review when the model proposes through the write device", async () => {
+	controller.dispose();
+	await session.dispose();
+	({ session } = await createAgentSession({
+		cwd: temp.path(),
+		sessionManager: SessionManager.create(temp.path(), temp.path()),
+		authStorage: auth,
+		modelRegistry: registry,
+		model: registry.find("anthropic", "claude-sonnet-4-5")!,
+		settings: Settings.isolated({ "compaction.enabled": false }),
+		toolNames: ["write"],
+		enableMCP: false,
+		enableLsp: false,
+		disableExtensionDiscovery: true,
+	}));
+	controller = new HeadlessPlanController(session, {
+		onEvent: event => events.push(event),
+		onError: error => errors.push(error),
+	});
+	await controller.enter({ planFilePath: "local://feature-plan.md" });
+	await Bun.write(controller.resolvePlanFilePath("local://feature-plan.md"), "# Feature\n\nProposed through write");
+	session.agent.streamFn = createMockModel({
+		responses: [
+			{
+				content: [
+					{ type: "toolCall", name: "write", arguments: { path: "xd://propose", content: "feature-plan" } },
+				],
+			},
+		],
+	}).stream;
+	await session.prompt("Submit the plan for review");
+	await controller.waitForIdle();
+	expect(errors).toEqual([]);
+	expect(controller.getPending()).toMatchObject({
+		title: "feature-plan",
+		planFilePath: "local://feature-plan.md",
+		planContent: expect.stringContaining("Proposed through write"),
+	});
+	expect(events.filter(event => event.type === "plan_review_requested")).toHaveLength(1);
+});
+
+it("allows nested session changes but rejects a separate change until the owner finishes", async () => {
+	const nested = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const changing = controller.withSessionChange(async () => {
+		expect(await controller.withSessionChange(async () => 7)).toBe(7);
+		nested.resolve();
+		await release.promise;
+	});
+	void changing.catch(nested.reject);
+	try {
+		await nested.promise;
+		await expect(controller.withSessionChange(async () => {})).rejects.toThrow("Plan transition is still running");
+	} finally {
+		release.resolve();
+		await changing;
+	}
 });
