@@ -628,6 +628,61 @@
 				"clientOmit": []
 			},
 			{
+				"name": "get_settings",
+				"doc": "Every setting the interactive panel shows, with its value.",
+				"params": null,
+				"result": "SettingsState",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "set_setting",
+				"doc": "Write one setting to the global config.",
+				"params": "SetSettingParams",
+				"result": "SettingEntry",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "unset_setting",
+				"doc": "Remove one setting from the global config so another layer or its default applies.",
+				"params": "UnsetSettingParams",
+				"result": "SettingEntry",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "get_model_roles",
+				"doc": "Model role assignments per settings layer.",
+				"params": null,
+				"result": "ModelRolesState",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
+				"name": "set_model_role",
+				"doc": "Assign a model selector to a role, or clear it with `null`. The default role also switches the running session.",
+				"params": "SetModelRoleParams",
+				"result": "ModelRolesState",
+				"nullable": false,
+				"unwrap": null,
+				"timeoutMs": null,
+				"completion": null,
+				"clientOmit": []
+			},
+			{
 				"name": "export_html",
 				"doc": "Export the session as HTML; returns the written path.",
 				"params": "ExportHtmlParams",
@@ -3019,6 +3074,228 @@
 				"summary",
 				"firstKeptEntryId",
 				"tokensBefore"
+			]
+		},
+		"SettingOption": {
+			"type": "object",
+			"properties": {
+				"value": {
+					"type": "string"
+				},
+				"label": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"value",
+				"label"
+			]
+		},
+		"SettingEntry": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				},
+				"tab": {
+					"type": "string"
+				},
+				"kind": {
+					"enum": [
+						"boolean",
+						"enum",
+						"submenu",
+						"text",
+						"multiselect",
+						"providerLimits"
+					],
+					"type": "string",
+					"description": "Control the setting edits with."
+				},
+				"valueType": {
+					"type": "string",
+					"description": "Schema type of the stored value."
+				},
+				"label": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"isSet": {
+					"type": "boolean"
+				},
+				"visible": {
+					"type": "boolean",
+					"description": "False while another setting the entry depends on hides it."
+				},
+				"group": {
+					"type": "string"
+				},
+				"warning": {
+					"type": "string"
+				},
+				"options": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SettingOption"
+					}
+				},
+				"secret": {
+					"type": "boolean",
+					"description": "A credential: `value` is withheld; `isSet` says whether one is stored."
+				},
+				"ordered": {
+					"type": "boolean",
+					"description": "Order of a `multiselect` value is meaningful."
+				},
+				"value": {},
+				"defaultValue": {}
+			},
+			"required": [
+				"path",
+				"tab",
+				"kind",
+				"valueType",
+				"label",
+				"description",
+				"isSet",
+				"visible"
+			],
+			"description": "A setting as the interactive `/settings` panel defines it, with its stored value."
+		},
+		"SettingsTab": {
+			"type": "object",
+			"properties": {
+				"id": {
+					"type": "string"
+				},
+				"label": {
+					"type": "string"
+				},
+				"groups": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "Section headings in display order."
+				}
+			},
+			"required": [
+				"id",
+				"label",
+				"groups"
+			]
+		},
+		"SettingsState": {
+			"type": "object",
+			"properties": {
+				"tabs": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SettingsTab"
+					}
+				},
+				"settings": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/SettingEntry"
+					}
+				}
+			},
+			"required": [
+				"tabs",
+				"settings"
+			]
+		},
+		"ModelRoleScope": {
+			"enum": [
+				"global",
+				"project"
+			],
+			"type": "string"
+		},
+		"ModelRole": {
+			"type": "object",
+			"properties": {
+				"role": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"section": {
+					"enum": [
+						"chat",
+						"kind"
+					],
+					"type": "string",
+					"description": "`kind` roles take an image, search, speech or judge model."
+				},
+				"provenance": {
+					"type": "string",
+					"description": "Settings layer the effective selector comes from."
+				},
+				"models": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"description": "`provider/id` of every available model the role accepts."
+				},
+				"tag": {
+					"type": "string"
+				},
+				"global": {
+					"type": "string",
+					"description": "Selector stored in the global config."
+				},
+				"project": {
+					"type": "string",
+					"description": "Selector stored in the current project's config."
+				},
+				"effective": {
+					"type": "string",
+					"description": "Selector in effect after layering."
+				},
+				"resolved": {
+					"type": "string",
+					"description": "`provider/id` the effective selector resolves to."
+				}
+			},
+			"required": [
+				"role",
+				"name",
+				"section",
+				"provenance",
+				"models"
+			],
+			"description": "One model role and what each settings layer assigns it."
+		},
+		"ModelRolesState": {
+			"type": "object",
+			"properties": {
+				"storage": {
+					"$ref": "#/$defs/ModelRoleScope",
+					"description": "Whether role edits may target the project layer."
+				},
+				"roles": {
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/ModelRole"
+					}
+				},
+				"active": {
+					"type": "string",
+					"description": "`provider/id` the session is running."
+				}
+			},
+			"required": [
+				"storage",
+				"roles"
 			]
 		},
 		"ModelCycleResult": {
@@ -7270,6 +7547,55 @@
 			"required": [
 				"held",
 				"unknown"
+			]
+		},
+		"SetSettingParams": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				},
+				"value": {}
+			},
+			"required": [
+				"path",
+				"value"
+			]
+		},
+		"UnsetSettingParams": {
+			"type": "object",
+			"properties": {
+				"path": {
+					"type": "string"
+				}
+			},
+			"required": [
+				"path"
+			]
+		},
+		"SetModelRoleParams": {
+			"type": "object",
+			"properties": {
+				"role": {
+					"type": "string"
+				},
+				"model": {
+					"anyOf": [
+						{
+							"type": "string"
+						},
+						{
+							"type": "null"
+						}
+					]
+				},
+				"scope": {
+					"$ref": "#/$defs/ModelRoleScope"
+				}
+			},
+			"required": [
+				"role",
+				"model"
 			]
 		},
 		"ExportHtmlParams": {

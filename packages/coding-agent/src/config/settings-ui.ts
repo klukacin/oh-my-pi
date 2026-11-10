@@ -58,7 +58,7 @@ function envNote(setting: AnySetting): string {
  * edits the value of the settings layers, never an environment-supplied one (so an env credential
  * is never pre-filled or written to config); descriptions note an active environment variable.
  */
-export function createSettingsHost(): SettingsHost {
+export function createSettingsHost(target: Settings = settings): SettingsHost {
 	const entries: SettingsDisplayEntry[] = [];
 	for (const tab of SETTING_TABS) {
 		for (const setting of orderedSettings()) {
@@ -83,9 +83,9 @@ export function createSettingsHost(): SettingsHost {
 	};
 	return {
 		entries,
-		get: path => lookup(path)?.layered(settings),
-		set: (path, value) => resolve(path).set(settings, value),
-		unset: path => resolve(path).unset(settings),
+		get: path => lookup(path)?.layered(target),
+		set: (path, value) => resolve(path).set(target, value),
+		unset: path => resolve(path).unset(target),
 		normalizeProviderLimits: normalizeProviderMaxInFlightRequests,
 		validateProviderLimits: validateProviderMaxInFlightRequests,
 	};
